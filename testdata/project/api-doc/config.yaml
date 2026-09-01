@@ -1,0 +1,53 @@
+configVersion: v1
+
+project:
+  name: Catalog API
+  version: 1.0.0
+  module: example/catalog
+  framework: gin
+  openapiVersion: 3.0.3
+
+source:
+  routePackages:
+    - ./routes/...
+  controllerPackages:
+    - ./handler/...
+  servicePackages:
+    - ./respond/...
+  modelPackages:
+    - ./model/...
+
+files:
+  selection: ./api-doc/selection.yaml
+  overrides: ./api-doc/overrides
+  output: ./api-doc/openapi.json
+  report: ./api-doc/report.json
+
+analysis:
+  conservative: true
+  inferManualRequiredChecks: true
+  fieldDescriptionFallback:
+    - override
+    - descriptionTag
+    - trailingComment
+    - gormComment
+
+responseFunctions:
+  - symbol: example/catalog/respond.OK
+    kind: success
+    status: 200
+    dataArgument: 1
+    wrapper: standardSuccess
+
+parameterHelpers: []
+schemaMappings: {}
+
+quality:
+  minimumRouteDiscoveryCoverage: 100
+  minimumManagedExactSchemaCoverage: 100
+  failOnDuplicateOperationID: true
+  failOnInvalidOpenAPI: true
+  failOnUnresolvedManagedPath: true
+  failOnUnknownManagedResponse: true
+  failOnOrphanSelection: true
+  failOnOrphanOverride: true

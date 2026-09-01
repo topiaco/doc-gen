@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://apidoc.local/schema/selection-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["configVersion", "defaultMode", "operations"],
+  "properties": {
+    "configVersion": { "const": "v1" },
+    "defaultMode": { "enum": ["managed", "manual", "ignored"] },
+    "operations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode"],
+        "properties": {
+          "mode": { "enum": ["managed", "manual", "ignored"] },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}
