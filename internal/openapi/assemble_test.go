@@ -41,8 +41,8 @@ func TestAssembleBuildsManagedDocument(t *testing.T) {
 				Status:      200,
 				Description: "Success",
 				Content: []ir.ResponseContent{
-					{MediaType: "application/json", Type: &item, Wrapper: "standardSuccess"},
-					{MediaType: "application/json", Wrapper: "businessError"},
+					{MediaType: "application/json", Type: &item, Wrapper: "success", DataTarget: true},
+					{MediaType: "application/json", Wrapper: "error"},
 				},
 			},
 			{
@@ -70,7 +70,7 @@ func TestAssembleBuildsManagedDocument(t *testing.T) {
 				Response: &config.ResponseOverride{
 					Status:  200,
 					Data:    &config.SchemaPatch{Description: "Saved item"},
-					Example: map[string]any{"code": 0, "data": map[string]any{"id": 1}, "message": "success"},
+					Example: map[string]any{"status": "ok", "payload": map[string]any{"id": 1}},
 					Content: map[string]config.SchemaPatch{
 						"text/plain": {Type: "string"},
 					},
@@ -79,13 +79,14 @@ func TestAssembleBuildsManagedDocument(t *testing.T) {
 		},
 	}
 	project := config.Project{Name: "Test API", Version: "1.0.0", OpenAPIVersion: "3.0.3"}
+	wrappers := responseWrappers()
 	builder := schema.NewBuilder(nil, nil)
 
-	document, err := Assemble(project, applied, builder)
+	document, err := Assemble(project, wrappers, applied, builder)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := Assemble(project, applied, builder)
+	second, err := Assemble(project, wrappers, applied, builder)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +127,7 @@ func TestAssembleBuildsManagedDocument(t *testing.T) {
 	}
 	successSchema := successContent["application/json"].(map[string]any)["schema"].(map[string]any)
 	successExample := successContent["application/json"].(map[string]any)["example"].(map[string]any)
-	if successExample["code"] != float64(0) || successExample["data"].(map[string]any)["id"] != float64(1) {
+	if successExample["status"] != "ok" || successExample["payload"].(map[string]any)["id"] != float64(1) {
 		t.Fatalf("200 response example = %#v", successExample)
 	}
 	if variants := successSchema["oneOf"].([]any); len(variants) != 2 {
@@ -162,6 +163,7 @@ func TestAssembleBuildsFormBody(t *testing.T) {
 	}
 	document, err := Assemble(
 		config.Project{Name: "Upload API", Version: "1", OpenAPIVersion: "3.0.3"},
+		nil,
 		override.Result{Operations: []ir.Operation{operation}},
 		schema.NewBuilder(nil, nil),
 	)
@@ -212,7 +214,7 @@ func findParameter(t *testing.T, parameters []any, location, name string) map[st
 	return nil
 }
 
-// hasDataDescription 判断统一响应是否包含指定 data 说明
+// hasDataDescription 判断统一响应是否包含指定动态字段说明
 func hasDataDescription(variants []any, description string) bool {
 	for _, candidate := range variants {
 		variant := candidate.(map[string]any)
@@ -220,10 +222,33 @@ func hasDataDescription(variants []any, description string) bool {
 		if !found {
 			continue
 		}
-		data, found := properties["data"].(map[string]any)
-		if found && data["description"] == description {
+		data, found := properties["payload"].(map[string]any)
+		status, statusFound := properties["status"].(map[string]any)
+		values, valuesFound := status["enum"].([]any)
+		if found && statusFound && valuesFound && len(values) == 1 && values[0] == "ok" && data["description"] == description {
 			return true
 		}
 	}
 	return false
+}
+
+// responseWrappers 返回不依赖业务字段名的测试响应包装
+func responseWrappers() map[string]config.ResponseWrapper {
+	wrapper := func(status string) config.ResponseWrapper {
+		return config.ResponseWrapper{
+			DataProperty: "payload",
+			Schema: map[string]any{
+				"type":     "object",
+				"required": []any{"status", "payload"},
+				"properties": map[string]any{
+					"status":  map[string]any{"type": "string", "enum": []any{status}},
+					"payload": map[string]any{},
+				},
+			},
+		}
+	}
+	return map[string]config.ResponseWrapper{
+		"success": wrapper("ok"),
+		"error":   wrapper("error"),
+	}
 }

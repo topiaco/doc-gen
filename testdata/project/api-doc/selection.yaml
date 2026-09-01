@@ -1,4 +1,4 @@
-configVersion: v1
+configVersion: v2
 defaultMode: manual
 operations:
   "GET /catalog/{id}":

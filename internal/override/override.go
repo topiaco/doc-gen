@@ -297,7 +297,7 @@ func buildOperationBases(operations []ir.Operation, builder *schema.Builder) (ma
 						continue
 					}
 					contentSchema = converted.Schema
-					if !responseSchema.hasData || content.Wrapper == "standardSuccess" {
+					if !responseSchema.hasData || content.DataTarget {
 						responseSchema.data = converted.Schema
 						responseSchema.hasData = true
 					}

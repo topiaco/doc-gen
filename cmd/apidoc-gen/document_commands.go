@@ -163,7 +163,7 @@ func buildArtifacts(bundle *config.Bundle) (generatedArtifacts, error) {
 		return generatedArtifacts{Report: reportDocument, ReportJSON: reportJSON}, fmt.Errorf("override validation failed with %d errors", errorCount)
 	}
 
-	openAPIDocument, err := apiopenapi.Assemble(bundle.Config.Project, state.Applied, state.Builder)
+	openAPIDocument, err := apiopenapi.Assemble(bundle.Config.Project, bundle.Config.ResponseWrappers, state.Applied, state.Builder)
 	if err != nil {
 		report.Evaluate(&reportDocument, bundle.Config.Quality, false)
 		reportJSON, _ := report.Marshal(reportDocument)

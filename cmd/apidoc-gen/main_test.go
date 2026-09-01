@@ -103,6 +103,9 @@ func TestRunGenerateWritesStableArtifacts(t *testing.T) {
 	}
 	firstOpenAPI := readTestFile(t, openAPIPath)
 	firstReport := readTestFile(t, reportPath)
+	if !bytes.Contains(firstOpenAPI, []byte(`"status"`)) || !bytes.Contains(firstOpenAPI, []byte(`"payload"`)) {
+		t.Fatalf("generated OpenAPI does not contain configured response fields: %s", firstOpenAPI)
+	}
 	var generatedReport report.Document
 	if err := json.Unmarshal(firstReport, &generatedReport); err != nil {
 		t.Fatal(err)
@@ -139,11 +142,15 @@ func writeOutputConfig(t *testing.T) (configPath, openAPIPath, reportPath string
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
+	dir, err := os.MkdirTemp(filepath.Join(root, "api-doc"), ".test-output-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	openAPIPath = filepath.Join(dir, "openapi.json")
 	reportPath = filepath.Join(dir, "report.json")
-	content := strings.Replace(string(data), "output: ./api-doc/openapi.json", "output: \""+openAPIPath+"\"", 1)
-	content = strings.Replace(content, "report: ./api-doc/report.json", "report: \""+reportPath+"\"", 1)
+	content := strings.Replace(string(data), "selection: selection.yaml", "selection: ../selection.yaml", 1)
+	content = strings.Replace(content, "overrides: overrides", "overrides: ../overrides", 1)
 	configPath = filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)

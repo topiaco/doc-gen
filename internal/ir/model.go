@@ -205,11 +205,12 @@ type RequestBody struct {
 
 // ResponseContent 表示一个响应媒体类型
 type ResponseContent struct {
-	MediaType  string     `json:"mediaType"`         // 响应媒体类型
-	Type       *TypeRef   `json:"type,omitempty"`    // JSON 数据静态类型
-	Binary     bool       `json:"binary,omitempty"`  // 是否为二进制内容
-	Wrapper    string     `json:"wrapper,omitempty"` // JSON 包装名称
-	Confidence Confidence `json:"confidence"`        // 内容分析可信度
+	MediaType  string     `json:"mediaType"`            // 响应媒体类型
+	Type       *TypeRef   `json:"type,omitempty"`       // JSON 数据静态类型
+	Binary     bool       `json:"binary,omitempty"`     // 是否为二进制内容
+	Wrapper    string     `json:"wrapper,omitempty"`    // JSON 包装名称
+	DataTarget bool       `json:"dataTarget,omitempty"` // 是否为响应数据覆盖目标
+	Confidence Confidence `json:"confidence"`           // 内容分析可信度
 }
 
 // Response 表示一个 HTTP 响应

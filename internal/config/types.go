@@ -1,15 +1,15 @@
 package config
 
 type Config struct {
-	ConfigVersion     string                   `json:"configVersion" yaml:"configVersion"`
-	Project           Project                  `json:"project" yaml:"project"`
-	Source            Source                   `json:"source" yaml:"source"`
-	Files             Files                    `json:"files" yaml:"files"`
-	Analysis          Analysis                 `json:"analysis" yaml:"analysis"`
-	ResponseFunctions []ResponseFunction       `json:"responseFunctions" yaml:"responseFunctions"`
-	ParameterHelpers  []ParameterHelper        `json:"parameterHelpers" yaml:"parameterHelpers"`
-	SchemaMappings    map[string]SchemaMapping `json:"schemaMappings" yaml:"schemaMappings"`
-	Quality           Quality                  `json:"quality" yaml:"quality"`
+	ConfigVersion     string                     `json:"configVersion" yaml:"configVersion"`
+	Project           Project                    `json:"project" yaml:"project"`
+	Source            Source                     `json:"source" yaml:"source"`
+	Files             Files                      `json:"files" yaml:"files"`
+	ResponseWrappers  map[string]ResponseWrapper `json:"responseWrappers" yaml:"responseWrappers"`
+	ResponseFunctions []ResponseFunction         `json:"responseFunctions" yaml:"responseFunctions"`
+	ParameterHelpers  []ParameterHelper          `json:"parameterHelpers" yaml:"parameterHelpers"`
+	SchemaMappings    map[string]SchemaMapping   `json:"schemaMappings" yaml:"schemaMappings"`
+	Quality           Quality                    `json:"quality" yaml:"quality"`
 }
 
 type Project struct {
@@ -21,10 +21,8 @@ type Project struct {
 }
 
 type Source struct {
-	RoutePackages      []string `json:"routePackages" yaml:"routePackages"`
-	ControllerPackages []string `json:"controllerPackages" yaml:"controllerPackages"`
-	ServicePackages    []string `json:"servicePackages" yaml:"servicePackages"`
-	ModelPackages      []string `json:"modelPackages" yaml:"modelPackages"`
+	RoutePackages    []string `json:"routePackages" yaml:"routePackages"`
+	AnalysisPackages []string `json:"analysisPackages" yaml:"analysisPackages"`
 }
 
 type Files struct {
@@ -34,10 +32,9 @@ type Files struct {
 	Report    string `json:"report" yaml:"report"`
 }
 
-type Analysis struct {
-	Conservative              bool     `json:"conservative" yaml:"conservative"`
-	InferManualRequiredChecks bool     `json:"inferManualRequiredChecks" yaml:"inferManualRequiredChecks"`
-	FieldDescriptionFallback  []string `json:"fieldDescriptionFallback" yaml:"fieldDescriptionFallback"`
+type ResponseWrapper struct {
+	DataProperty string         `json:"dataProperty" yaml:"dataProperty"` // 动态数据字段名
+	Schema       map[string]any `json:"schema" yaml:"schema"`             // 响应包装 Schema
 }
 
 type ResponseFunction struct {
@@ -47,6 +44,7 @@ type ResponseFunction struct {
 	StatusArgument *int   `json:"statusArgument,omitempty" yaml:"statusArgument,omitempty"` // 状态码实参下标
 	DataArgument   *int   `json:"dataArgument,omitempty" yaml:"dataArgument,omitempty"`     // 响应数据实参下标
 	Wrapper        string `json:"wrapper,omitempty" yaml:"wrapper,omitempty"`               // JSON 响应包装名称
+	DataTarget     bool   `json:"dataTarget,omitempty" yaml:"dataTarget,omitempty"`         // 是否为响应数据覆盖目标
 	MediaType      string `json:"mediaType,omitempty" yaml:"mediaType,omitempty"`           // 二进制响应媒体类型
 }
 

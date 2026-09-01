@@ -26,7 +26,7 @@ func TestAnalyzeJSONResponseShapesAndMerging(t *testing.T) {
 		t.Fatalf("shape response content count = %d, want 6", len(response.Content))
 	}
 	for _, typeName := range []string{"*fixture/responses.Item", "[]*fixture/responses.Item", "*fixture/responses.Pagination[*fixture/responses.Item]", "uint", "", "map[string]any"} {
-		findResponseContent(t, response.Content, "standardSuccess", typeName)
+		findResponseContent(t, response.Content, "success", typeName)
 	}
 	if !hasDiagnostic(shapes.Operation.Diagnostics, "response.dynamic_data") {
 		t.Fatalf("shape diagnostics = %#v", shapes.Operation.Diagnostics)
@@ -37,9 +37,9 @@ func TestAnalyzeJSONResponseShapesAndMerging(t *testing.T) {
 	if len(merged.Content) != 3 {
 		t.Fatalf("merged response content = %#v", merged.Content)
 	}
-	findResponseContent(t, merged.Content, "standardSuccess", "*fixture/responses.Item")
-	findResponseContent(t, merged.Content, "standardError", "")
-	findResponseContent(t, merged.Content, "businessError", "")
+	findResponseContent(t, merged.Content, "success", "*fixture/responses.Item")
+	findResponseContent(t, merged.Content, "error", "")
+	findResponseContent(t, merged.Content, "business", "")
 
 	statuses := findResolution(t, analyzed, "GET /responses/statuses")
 	if len(statuses.Operation.Responses) != 2 || statuses.Operation.Responses[0].Status != 400 || statuses.Operation.Responses[1].Status != 500 {
@@ -57,9 +57,9 @@ func fixtureResponseFunctions() []config.ResponseFunction {
 	statusArgument := 1
 	dataArgument := 1
 	return []config.ResponseFunction{
-		{Symbol: "fixture/responses.SetResponseOK", Kind: "success", Status: 200, DataArgument: &dataArgument, Wrapper: "standardSuccess"},
-		{Symbol: "fixture/responses.SetResponseError", Kind: "error", StatusArgument: &statusArgument, Wrapper: "standardError"},
-		{Symbol: "fixture/responses.SetResponseBusinessError", Kind: "businessError", Status: 200, Wrapper: "businessError"},
+		{Symbol: "fixture/responses.SetResponseOK", Kind: "json", Status: 200, DataArgument: &dataArgument, Wrapper: "success", DataTarget: true},
+		{Symbol: "fixture/responses.SetResponseError", Kind: "json", StatusArgument: &statusArgument, Wrapper: "error"},
+		{Symbol: "fixture/responses.SetResponseBusinessError", Kind: "json", Status: 200, Wrapper: "business"},
 		{Symbol: "fixture/responses.SendBinary", Kind: "binary", Status: 200, MediaType: "application/octet-stream"},
 	}
 }

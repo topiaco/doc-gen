@@ -62,17 +62,25 @@ func TestLoadOverridesInFilenameOrder(t *testing.T) {
 func TestLoadRejectsInvalidProjectConfig(t *testing.T) {
 	validConfig := readProjectConfig(t)
 	tests := map[string]string{
-		"invalid version":           strings.Replace(validConfig, "configVersion: v1", "configVersion: v2", 1),
-		"unknown field":             validConfig + "\nunexpected: true\n",
-		"duplicate key":             "configVersion: v1\n" + validConfig,
-		"json without wrapper":      strings.Replace(validConfig, "\n    wrapper: standardSuccess", "", 1),
+		"invalid version":      strings.Replace(validConfig, "configVersion: v2", "configVersion: v1", 1),
+		"unknown field":        validConfig + "\nunexpected: true\n",
+		"duplicate key":        "configVersion: v2\n" + validConfig,
+		"unknown wrapper":      strings.Replace(validConfig, "wrapper: envelope", "wrapper: missing", 1),
+		"absolute file path":   strings.Replace(validConfig, "selection: selection.yaml", "selection: /tmp/selection.yaml", 1),
+		"path outside project": strings.Replace(validConfig, "selection: selection.yaml", "selection: ../../selection.yaml", 1),
+		"module mismatch":      strings.Replace(validConfig, "module: example/catalog", "module: example/other", 1),
+		"conflicting status":   strings.Replace(validConfig, "status: 200\n    dataArgument", "status: 200\n    statusArgument: 0\n    dataArgument", 1),
 	}
 
 	for name, projectConfig := range tests {
 		t.Run(name, func(t *testing.T) {
 			root := writeFixture(t, projectConfig, validSelection, validOverride)
-			if _, err := Load(root, "api-doc/config.yaml"); err == nil {
+			_, err := Load(root, "api-doc/config.yaml")
+			if err == nil {
 				t.Fatal("Load() error = nil, want validation error")
+			}
+			if name == "invalid version" && !strings.Contains(err.Error(), "unsupported configVersion \"v1\"") {
+				t.Fatalf("Load() error = %q, want unsupported v1 error", err)
 			}
 		})
 	}
@@ -101,9 +109,15 @@ func TestLoadRejectsInvalidReferencedConfig(t *testing.T) {
 			wantInError: "selection.yaml",
 		},
 		{
+			name:        "invalid selection version",
+			selection:   strings.Replace(validSelection, "v2", "v1", 1),
+			override:    validOverride,
+			wantInError: "selection.yaml",
+		},
+		{
 			name:        "invalid override version",
 			selection:   validSelection,
-			override:    strings.Replace(validOverride, "v1", "v2", 1),
+			override:    strings.Replace(validOverride, "v2", "v1", 1),
 			wantInError: "base.yaml",
 		},
 		{
@@ -133,12 +147,12 @@ func TestLoadRejectsInvalidReferencedConfig(t *testing.T) {
 	}
 }
 
-const validSelection = `configVersion: v1
+const validSelection = `configVersion: v2
 defaultMode: manual
 operations: {}
 `
 
-const validOverride = `configVersion: v1
+const validOverride = `configVersion: v2
 operations: {}
 schemas: {}
 `
@@ -161,6 +175,7 @@ func writeFixture(t *testing.T, projectConfig, selection, override string) strin
 	if err := os.MkdirAll(overridesDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	writeTestFile(t, filepath.Join(root, "go.mod"), "module example/catalog\n\ngo 1.25\n")
 	writeTestFile(t, filepath.Join(root, "api-doc/config.yaml"), projectConfig)
 	writeTestFile(t, filepath.Join(root, "api-doc/selection.yaml"), selection)
 	writeTestFile(t, filepath.Join(overridesDir, "base.yaml"), override)

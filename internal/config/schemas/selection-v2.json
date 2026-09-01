@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://apidoc.local/schema/selection-v1.json",
+  "$id": "https://apidoc.local/schema/selection-v2.json",
   "type": "object",
   "additionalProperties": false,
   "required": ["configVersion", "defaultMode", "operations"],
   "properties": {
-    "configVersion": { "const": "v1" },
+    "configVersion": { "const": "v2" },
     "defaultMode": { "enum": ["managed", "manual", "ignored"] },
     "operations": {
       "type": "object",

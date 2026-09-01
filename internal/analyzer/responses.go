@@ -16,7 +16,7 @@ import (
 func AnalyzeJSONResponses(program *Program, resolutions []HandlerResolution, functions []config.ResponseFunction) []HandlerResolution {
 	functionBySymbol := make(map[string]config.ResponseFunction, len(functions))
 	for _, function := range functions {
-		if function.Kind != "binary" {
+		if function.Kind == "json" {
 			functionBySymbol[function.Symbol] = function
 		}
 	}
@@ -110,6 +110,7 @@ func responseContent(program *Program, info *types.Info, call *ast.CallExpr, fun
 	content := ir.ResponseContent{
 		MediaType:  "application/json",
 		Wrapper:    function.Wrapper,
+		DataTarget: function.DataTarget,
 		Confidence: ir.ConfidenceConfigured,
 	}
 	if function.DataArgument == nil {
@@ -252,5 +253,5 @@ func responseContentKey(content ir.ResponseContent) string {
 	if content.Type != nil {
 		typeName = content.Type.String()
 	}
-	return content.MediaType + "\x00" + content.Wrapper + "\x00" + typeName + "\x00" + strconv.FormatBool(content.Binary)
+	return content.MediaType + "\x00" + content.Wrapper + "\x00" + typeName + "\x00" + strconv.FormatBool(content.Binary) + "\x00" + strconv.FormatBool(content.DataTarget)
 }

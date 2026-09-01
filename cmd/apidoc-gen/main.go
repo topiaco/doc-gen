@@ -107,16 +107,18 @@ type analysisResult struct {
 
 // analyzeProject 运行完整静态分析链并保留发现诊断
 func analyzeProject(bundle *config.Bundle) (analysisResult, error) {
-	patterns := append([]string{}, bundle.Config.Source.RoutePackages...)
-	patterns = append(patterns, bundle.Config.Source.ControllerPackages...)
-	patterns = append(patterns, bundle.Config.Source.ServicePackages...)
-	patterns = append(patterns, bundle.Config.Source.ModelPackages...)
-	program, err := analyzer.Load(context.Background(), bundle.Paths.ProjectRoot, patterns)
+	routeProgram, err := analyzer.Load(context.Background(), bundle.Paths.ProjectRoot, bundle.Config.Source.RoutePackages)
 	if err != nil {
 		return analysisResult{}, err
 	}
-	discovery := analyzer.DiscoverGinRoutes(program)
+	discovery := analyzer.DiscoverGinRoutes(routeProgram)
 	operations, err := selection.Apply(discovery.Operations, bundle.Selection)
+	if err != nil {
+		return analysisResult{}, err
+	}
+	patterns := append([]string{}, bundle.Config.Source.RoutePackages...)
+	patterns = append(patterns, bundle.Config.Source.AnalysisPackages...)
+	program, err := analyzer.Load(context.Background(), bundle.Paths.ProjectRoot, patterns)
 	if err != nil {
 		return analysisResult{}, err
 	}

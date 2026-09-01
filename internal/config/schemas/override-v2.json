@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://apidoc.local/schema/override-v1.json",
+  "$id": "https://apidoc.local/schema/override-v2.json",
   "type": "object",
   "additionalProperties": false,
   "required": ["configVersion", "operations", "schemas"],
   "properties": {
-    "configVersion": { "const": "v1" },
+    "configVersion": { "const": "v2" },
     "operations": {
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/operation" }

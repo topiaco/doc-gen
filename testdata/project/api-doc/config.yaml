@@ -1,4 +1,4 @@
-configVersion: v1
+configVersion: v2
 
 project:
   name: Catalog API
@@ -10,34 +10,36 @@ project:
 source:
   routePackages:
     - ./routes/...
-  controllerPackages:
+  analysisPackages:
     - ./handler/...
-  servicePackages:
     - ./respond/...
-  modelPackages:
     - ./model/...
 
 files:
-  selection: ./api-doc/selection.yaml
-  overrides: ./api-doc/overrides
-  output: ./api-doc/openapi.json
-  report: ./api-doc/report.json
+  selection: selection.yaml
+  overrides: overrides
+  output: openapi.json
+  report: report.json
 
-analysis:
-  conservative: true
-  inferManualRequiredChecks: true
-  fieldDescriptionFallback:
-    - override
-    - descriptionTag
-    - trailingComment
-    - gormComment
+responseWrappers:
+  envelope:
+    dataProperty: payload
+    schema:
+      type: object
+      required: [status, payload]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        payload: {}
 
 responseFunctions:
   - symbol: example/catalog/respond.OK
-    kind: success
+    kind: json
     status: 200
     dataArgument: 1
-    wrapper: standardSuccess
+    wrapper: envelope
+    dataTarget: true
 
 parameterHelpers: []
 schemaMappings: {}
