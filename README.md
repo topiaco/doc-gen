@@ -42,37 +42,11 @@ go build -o /tmp/apidoc-gen ./cmd/apidoc-gen
 
 ## 接入业务项目
 
-业务仓库只需保留以下内容：
-
-```text
-api-doc/
-├── config.yaml
-├── selection.yaml
-└── overrides/
-    └── base.yaml
-```
-
-默认命令从项目根目录读取 `api-doc/config.yaml`：
-
-```bash
-apidoc-gen generate
-apidoc-gen validate
-apidoc-gen list --mode managed
-apidoc-gen explain "GET /items/{id}"
-apidoc-gen list-unresolved
-apidoc-gen check-overrides
-```
-
-若配置文件位于其他项目内目录，可显式指定：
-
-```bash
-apidoc-gen generate --project-root /path/to/project --config docs/api/config.yaml
-```
-
-`files.*` 始终相对于主配置文件所在目录解析，且必须保持在项目根目录内部。源码包模式同样必须使用项目内相对路径。
+新项目直接按照[业务项目接入手册](docs/integration-guide.md)完成目录、v2 配置、接口选择、生成验收和 CI 接入。单仓多应用必须区分 Git 根目录与包含 `go.mod` 的项目根目录。
 
 ## 配置资料
 
+- [业务项目接入手册与工作流程](docs/integration-guide.md)
 - [v2 配置说明](docs/configuration-v2.md)
 - [v1 到 v2 迁移说明](docs/migration-v1-to-v2.md)
 - [主配置 JSON Schema](internal/config/schemas/config-v2.json)
