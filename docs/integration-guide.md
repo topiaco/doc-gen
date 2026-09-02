@@ -119,6 +119,8 @@ schemas: {}
 
 注意：`files.*` 相对于 `api-doc/config.yaml` 所在目录解析，只能使用项目内相对路径。
 
+本手册后续命令统一显式使用 `--config api-doc/config.yaml`。从项目根目录执行且使用默认路径时可以省略该参数；配置文件不在默认路径时必须填写实际的项目内相对路径。
+
 ## 4. 配置项目响应规则
 
 直接调用 `gin.Context.JSON` 的项目可以先保持空配置。使用统一响应函数时，必须在主配置中声明 Wrapper 和函数完整符号：
@@ -153,7 +155,7 @@ responseFunctions:
 先列出发现的路由：
 
 ```bash
-apidoc-gen list
+apidoc-gen list --config api-doc/config.yaml
 ```
 
 选择以下一种策略，不要混用。
@@ -170,10 +172,10 @@ operations: {}
 
 ### 已有项目：只自动纳管后续新增接口
 
-先保持 `defaultMode: manual` 和空 `operations`，确认 `apidoc-gen list --mode manual` 已发现全部存量路由。然后只在首次接入时生成存量 Selection：
+先保持 `defaultMode: manual` 和空 `operations`，确认 `apidoc-gen list --mode manual --config api-doc/config.yaml` 已发现全部存量路由。然后只在首次接入时生成存量 Selection：
 
 ```bash
-apidoc-gen list --mode manual | awk -F '\t' '
+apidoc-gen list --mode manual --config api-doc/config.yaml | awk -F '\t' '
 BEGIN {
   print "configVersion: v2"
   print "defaultMode: managed"
@@ -191,7 +193,7 @@ $1 == "manual" {
 
 ```bash
 mv api-doc/selection.generated.yaml api-doc/selection.yaml
-apidoc-gen validate
+apidoc-gen validate --config api-doc/config.yaml
 ```
 
 此后不要把新接口补成 `manual`。新接口未出现在 Selection 中，会通过 `defaultMode: managed` 自动进入 OpenAPI。删除存量路由时要删除对应 Selection；修改存量路由的 Method 或 Path 时，要同步更新其精确路由键。
@@ -217,9 +219,9 @@ operations:
 先查看实际纳管接口，再按需检查某条接口：
 
 ```bash
-apidoc-gen list --mode managed
-apidoc-gen explain "GET /items/{id}"
-apidoc-gen list-unresolved
+apidoc-gen list --mode managed --config api-doc/config.yaml
+apidoc-gen explain --config api-doc/config.yaml "GET /items/{id}"
+apidoc-gen list-unresolved --config api-doc/config.yaml
 ```
 
 `list-unresolved` 是全量静态分析诊断，会同时列出 `managed`、`manual` 和 `ignored` 的警告，并且出现警告时仍可返回退出码 `0`。它不是验收门禁，也不要求结果为 `0`。`manual` 和 `ignored` 不生成 OpenAPI，其诊断无需处理。
@@ -254,10 +256,10 @@ schemas:
 ```bash
 go build ./...
 go test ./...
-apidoc-gen list --mode managed
-apidoc-gen check-overrides
-apidoc-gen validate
-apidoc-gen generate
+apidoc-gen list --mode managed --config api-doc/config.yaml
+apidoc-gen check-overrides --config api-doc/config.yaml
+apidoc-gen validate --config api-doc/config.yaml
+apidoc-gen generate --config api-doc/config.yaml
 git diff -- api-doc/openapi.json api-doc/report.json
 ```
 
@@ -265,11 +267,11 @@ git diff -- api-doc/openapi.json api-doc/report.json
 
 | 命令 | 用途 | 是否要求无输出 |
 | --- | --- | --- |
-| `list --mode managed` | 确认实际生成范围 | 否 |
-| `list-unresolved` | 按需查看所有模式的分析诊断 | 否，且不作为门禁 |
-| `check-overrides` | 校验 Override 引用 | 要求 `errors=0` |
-| `validate` | 执行质量门禁，不写生成文件 | 要求全部 `pass` |
-| `generate` | 通过门禁后写入 OpenAPI 和报告 | 要求退出码为 `0` |
+| `list --mode managed --config api-doc/config.yaml` | 确认实际生成范围 | 否 |
+| `list-unresolved --config api-doc/config.yaml` | 按需查看所有模式的分析诊断 | 否，且不作为门禁 |
+| `check-overrides --config api-doc/config.yaml` | 校验 Override 引用 | 要求 `errors=0` |
+| `validate --config api-doc/config.yaml` | 执行质量门禁，不写生成文件 | 要求全部 `pass` |
+| `generate --config api-doc/config.yaml` | 通过门禁后写入 OpenAPI 和报告 | 要求退出码为 `0` |
 
 验收要求：
 
@@ -332,15 +334,15 @@ jobs:
 
       - name: Check documentation overrides
         working-directory: ${{ env.PROJECT_DIR }}
-        run: apidoc-gen check-overrides
+        run: apidoc-gen check-overrides --config api-doc/config.yaml
 
       - name: Validate documentation
         working-directory: ${{ env.PROJECT_DIR }}
-        run: apidoc-gen validate
+        run: apidoc-gen validate --config api-doc/config.yaml
 
       - name: Generate documentation
         working-directory: ${{ env.PROJECT_DIR }}
-        run: apidoc-gen generate
+        run: apidoc-gen generate --config api-doc/config.yaml
 
       - name: Verify committed artifacts
         run: |
