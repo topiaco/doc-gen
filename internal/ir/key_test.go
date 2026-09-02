@@ -9,9 +9,9 @@ func TestNormalizePath(t *testing.T) {
 		path string
 		want string
 	}{
-		{name: "named parameter", path: "/api/document/receipt/:id", want: "/api/document/receipt/{id}"},
+		{name: "named parameter", path: "/widgets/:id", want: "/widgets/{id}"},
 		{name: "wildcard parameter", path: "/files/*path", want: "/files/{path}"},
-		{name: "normalized parameter", path: "/orders/{order_id}", want: "/orders/{order_id}"},
+		{name: "normalized parameter", path: "/widgets/{widget_id}", want: "/widgets/{widget_id}"},
 		{name: "root", path: "/", want: "/"},
 	}
 
@@ -31,15 +31,15 @@ func TestNormalizePath(t *testing.T) {
 // TestNormalizePathRejectsInvalidPath 验证非法路由路径会被拒绝
 func TestNormalizePathRejectsInvalidPath(t *testing.T) {
 	paths := []string{
-		"api/orders/:id",
-		"/api//orders",
-		"/api/orders/:",
-		"/api/orders/id:part",
-		"/api/orders/{id",
-		"/api/orders/{1id}",
-		"/api/orders/:id?active=true",
-		"/api/orders/#latest",
-		"/api/orders/with space",
+		"widgets/:id",
+		"/api//widgets",
+		"/widgets/:",
+		"/widgets/id:part",
+		"/widgets/{id",
+		"/widgets/{1id}",
+		"/widgets/:id?active=true",
+		"/widgets/#latest",
+		"/widgets/with space",
 	}
 
 	for _, path := range paths {
@@ -53,22 +53,22 @@ func TestNormalizePathRejectsInvalidPath(t *testing.T) {
 
 // TestNewOperationKey 验证源码路由生成规范化精确键
 func TestNewOperationKey(t *testing.T) {
-	key, err := NewOperationKey("GET", "/api/order/:id")
+	key, err := NewOperationKey("GET", "/widgets/:id")
 	if err != nil {
 		t.Fatalf("NewOperationKey() error = %v", err)
 	}
-	if got := key.String(); got != "GET /api/order/{id}" {
+	if got := key.String(); got != "GET /widgets/{id}" {
 		t.Fatalf("OperationKey.String() = %q", got)
 	}
 }
 
 // TestParseOperationKey 验证配置精确键只能使用规范化格式
 func TestParseOperationKey(t *testing.T) {
-	key, err := ParseOperationKey("PUT /api/document/receipt/{id}")
+	key, err := ParseOperationKey("PUT /widgets/{id}")
 	if err != nil {
 		t.Fatalf("ParseOperationKey() error = %v", err)
 	}
-	if key.Method != "PUT" || key.Path != "/api/document/receipt/{id}" {
+	if key.Method != "PUT" || key.Path != "/widgets/{id}" {
 		t.Fatalf("ParseOperationKey() = %#v", key)
 	}
 }
@@ -76,12 +76,12 @@ func TestParseOperationKey(t *testing.T) {
 // TestParseOperationKeyRejectsInvalidKey 验证非精确键格式会被拒绝
 func TestParseOperationKeyRejectsInvalidKey(t *testing.T) {
 	keys := []string{
-		"get /api/order/{id}",
-		"GET  /api/order/{id}",
-		"GET /api/order/:id",
-		"GET api/order/{id}",
+		"get /widgets/{id}",
+		"GET  /widgets/{id}",
+		"GET /widgets/:id",
+		"GET widgets/{id}",
 		"GET",
-		"GET /api/order/{id} extra",
+		"GET /widgets/{id} extra",
 	}
 
 	for _, key := range keys {

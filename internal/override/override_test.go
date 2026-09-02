@@ -18,13 +18,13 @@ func TestApplyValidOverrides(t *testing.T) {
 		Path: "overrides/valid.yaml",
 		Document: config.OverrideDocument{
 			Operations: map[string]config.OperationOverride{
-				"GET /orders/{id}": {
-					OperationID: "Order_Get",
-					Description: "查询订单",
-					Tags:        []string{"订单"},
+				"GET /items/{id}": {
+					OperationID: "Item_Get",
+					Description: "查询条目",
+					Tags:        []string{"条目"},
 					Parameters: []config.ParameterOverride{
 						{
-							Name: "id", Location: "path", Description: "订单 ID",
+							Name: "id", Location: "path", Description: "条目 ID",
 							Schema: config.SchemaPatch{Type: "integer", Minimum: &minimum},
 						},
 						{
@@ -34,37 +34,37 @@ func TestApplyValidOverrides(t *testing.T) {
 					},
 					Response: &config.ResponseOverride{
 						Status: 200,
-						Data:   &config.SchemaPatch{Ref: "#/components/schemas/OrderDetail"},
+						Data:   &config.SchemaPatch{Ref: "#/components/schemas/ItemDetail"},
 					},
 				},
-				"POST /orders": {
+				"POST /items": {
 					Body: &config.SchemaPatch{Properties: map[string]config.SchemaPatch{
-						"id":   {Description: "订单标识"},
-						"name": {Description: "订单名称"},
+						"id":   {Description: "条目标识"},
+						"name": {Description: "条目名称"},
 					}},
 					Response: &config.ResponseOverride{
 						Status: 200,
 						Content: map[string]config.SchemaPatch{
 							"application/json": {Properties: map[string]config.SchemaPatch{
-								"state": {Description: "订单状态"},
+								"state": {Description: "条目状态"},
 							}},
 						},
 					},
 				},
 			},
 			Schemas: map[string]config.SchemaPatch{
-				"OrderDetail": {
+				"ItemDetail": {
 					Type:     "object",
 					Required: []string{"state"},
 					Properties: map[string]config.SchemaPatch{
-						"state": {Ref: "#/components/schemas/OrderState"},
+						"state": {Ref: "#/components/schemas/ItemState"},
 					},
 				},
-				"OrderState": {
+				"ItemState": {
 					Type: "integer",
 					Enum: []config.NamedEnumValue{
 						{Value: 1, Name: "新建"},
-						{Value: 2, Name: "完成", Description: "订单已完成"},
+						{Value: 2, Name: "完成", Description: "条目已完成"},
 					},
 				},
 			},
@@ -85,8 +85,8 @@ func TestApplyValidOverrides(t *testing.T) {
 		t.Fatalf("counts = %d, %d, %d", valid, warnings, errors)
 	}
 
-	operation := findOperation(t, result.Operations, "GET /orders/{id}")
-	if operation.OperationID != "Order_Get" || operation.Description != "查询订单" || len(operation.Tags) != 1 {
+	operation := findOperation(t, result.Operations, "GET /items/{id}")
+	if operation.OperationID != "Item_Get" || operation.Description != "查询条目" || len(operation.Tags) != 1 {
 		t.Fatalf("operation metadata = %#v", operation)
 	}
 	limit := findParameter(t, operation, "query", "limit")
@@ -97,23 +97,23 @@ func TestApplyValidOverrides(t *testing.T) {
 	if id.Type.Name != "integer" || id.Minimum == nil || *id.Minimum != 1 || id.Confidence != ir.ConfidenceOverride {
 		t.Fatalf("id parameter = %#v", id)
 	}
-	if findOperation(t, result.Operations, "POST /orders").RequestBody.Confidence != ir.ConfidenceOverride {
+	if findOperation(t, result.Operations, "POST /items").RequestBody.Confidence != ir.ConfidenceOverride {
 		t.Fatal("body override confidence was not applied")
 	}
 	if len(operation.Diagnostics) != 0 {
 		t.Fatalf("resolved operation diagnostics = %#v", operation.Diagnostics)
 	}
 
-	state, found := result.Schemas["OrderState"]
+	state, found := result.Schemas["ItemState"]
 	if !found {
-		t.Fatal("OrderState schema was not applied")
+		t.Fatal("ItemState schema was not applied")
 	}
 	data, err := json.Marshal(state)
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 	if !strings.Contains(string(data), `"enum":[1,2]`) || !strings.Contains(string(data), `"x-apifox-enum"`) {
-		t.Fatalf("OrderState schema = %s", data)
+		t.Fatalf("ItemState schema = %s", data)
 	}
 }
 
@@ -124,11 +124,11 @@ func TestApplyReportsErrorsWarningsAndValidEntries(t *testing.T) {
 			Path: "overrides/a.yaml",
 			Document: config.OverrideDocument{
 				Operations: map[string]config.OperationOverride{
-					"GET /orders/{id}": {},
-					"GET /files":       {Summary: "ignored"},
-					"GET /manual":      {Summary: "manual"},
-					"GET /missing":     {},
-					"POST /orders": {
+					"GET /items/{id}": {},
+					"GET /files":      {Summary: "ignored"},
+					"GET /manual":     {Summary: "manual"},
+					"GET /missing":    {},
+					"POST /items": {
 						Parameters: []config.ParameterOverride{
 							{Name: "missing", Location: "query", Schema: config.SchemaPatch{}},
 						},
@@ -148,7 +148,7 @@ func TestApplyReportsErrorsWarningsAndValidEntries(t *testing.T) {
 		{
 			Path: "overrides/b.yaml",
 			Document: config.OverrideDocument{
-				Operations: map[string]config.OperationOverride{"GET /orders/{id}": {}},
+				Operations: map[string]config.OperationOverride{"GET /items/{id}": {}},
 				Schemas:    map[string]config.SchemaPatch{"Duplicate": {Type: "string"}},
 			},
 		},
@@ -184,8 +184,8 @@ func TestApplyReportsErrorsWarningsAndValidEntries(t *testing.T) {
 // TestApplyRejectsCrossFileDuplicates 验证跨文件重复定义均不生效
 func TestApplyRejectsCrossFileDuplicates(t *testing.T) {
 	files := []config.OverrideFile{
-		{Path: "z.yaml", Document: config.OverrideDocument{Operations: map[string]config.OperationOverride{"GET /orders/{id}": {}}, Schemas: map[string]config.SchemaPatch{"Value": {Type: "string"}}}},
-		{Path: "a.yaml", Document: config.OverrideDocument{Operations: map[string]config.OperationOverride{"GET /orders/{id}": {}}, Schemas: map[string]config.SchemaPatch{"Value": {Type: "string"}}}},
+		{Path: "z.yaml", Document: config.OverrideDocument{Operations: map[string]config.OperationOverride{"GET /items/{id}": {}}, Schemas: map[string]config.SchemaPatch{"Value": {Type: "string"}}}},
+		{Path: "a.yaml", Document: config.OverrideDocument{Operations: map[string]config.OperationOverride{"GET /items/{id}": {}}, Schemas: map[string]config.SchemaPatch{"Value": {Type: "string"}}}},
 	}
 	result := Apply(testOperations(), files, schema.NewBuilder(nil, nil))
 	if !hasDiagnostic(result.Diagnostics, "override.duplicate_operation") || !hasDiagnostic(result.Diagnostics, "override.duplicate_schema") {
@@ -201,7 +201,7 @@ func testOperations() []ir.Operation {
 	stringType := ir.TypeRef{Kind: ir.TypeBasic, Name: "string"}
 	integerType := ir.TypeRef{Kind: ir.TypeBasic, Name: "int"}
 	uintType := ir.TypeRef{Kind: ir.TypeBasic, Name: "uint"}
-	orderType := ir.TypeRef{Kind: ir.TypeStruct, Fields: []ir.Field{
+	itemType := ir.TypeRef{Kind: ir.TypeStruct, Fields: []ir.Field{
 		{Name: "ID", JSONName: "id", Type: uintType, Confidence: ir.ConfidenceExact},
 		{Name: "State", JSONName: "state", Type: integerType, Confidence: ir.ConfidenceExact},
 	}}
@@ -213,17 +213,17 @@ func testOperations() []ir.Operation {
 	}}
 	return []ir.Operation{
 		{
-			Method: "GET", Path: "/orders/{id}", Mode: ir.ModeManaged,
+			Method: "GET", Path: "/items/{id}", Mode: ir.ModeManaged,
 			Parameters: []ir.Parameter{
 				{Name: "id", Location: ir.ParameterPath, Required: true, Type: stringType, Confidence: ir.ConfidenceExact},
 				{Name: "limit", Location: ir.ParameterQuery, Type: integerType, Confidence: ir.ConfidenceExact},
 			},
-			Responses: []ir.Response{{Status: 200, Content: []ir.ResponseContent{{MediaType: "application/json", Wrapper: "envelope", DataTarget: true, Type: &orderType}}}},
+			Responses: []ir.Response{{Status: 200, Content: []ir.ResponseContent{{MediaType: "application/json", Wrapper: "envelope", DataTarget: true, Type: &itemType}}}},
 		},
 		{
-			Method: "POST", Path: "/orders", Mode: ir.ModeManaged,
+			Method: "POST", Path: "/items", Mode: ir.ModeManaged,
 			RequestBody: &ir.RequestBody{ContentType: "application/json", Required: true, Type: bodyType, Confidence: ir.ConfidenceExact},
-			Responses:   []ir.Response{{Status: 200, Content: []ir.ResponseContent{{MediaType: "application/json", Wrapper: "envelope", DataTarget: true, Type: &orderType}}}},
+			Responses:   []ir.Response{{Status: 200, Content: []ir.ResponseContent{{MediaType: "application/json", Wrapper: "envelope", DataTarget: true, Type: &itemType}}}},
 		},
 		{Method: "GET", Path: "/files", Mode: ir.ModeIgnored},
 		{Method: "GET", Path: "/manual", Mode: ir.ModeManual},

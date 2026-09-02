@@ -177,7 +177,7 @@ func TestAssembleBuildsFormBody(t *testing.T) {
 
 // TestOperationID 验证默认 OperationID 规范化
 func TestOperationID(t *testing.T) {
-	if got, want := OperationID("POST", "/api/order/{id}/node-save"), "post_api_order_id_node_save"; got != want {
+	if got, want := OperationID("POST", "/widgets/{id}/save"), "post_widgets_id_save"; got != want {
 		t.Fatalf("OperationID() = %q, want %q", got, want)
 	}
 }

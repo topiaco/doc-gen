@@ -34,30 +34,30 @@ func Register(engine *gin.Engine) {
 
 // Shapes 返回不同静态类型的成功数据
 func Shapes(c *gin.Context) {
-	SetResponseOK(c, &Item{})
-	SetResponseOK(c, []*Item{})
-	SetResponseOK(c, &Pagination[*Item]{})
-	SetResponseOK(c, uint(1))
-	SetResponseOK(c, nil)
-	SetResponseOK(c, map[string]any{"item": &Item{}})
+	Send(c, &Item{})
+	Send(c, []*Item{})
+	Send(c, &Pagination[*Item]{})
+	Send(c, uint(1))
+	Send(c, nil)
+	Send(c, map[string]any{"item": &Item{}})
 }
 
 // Merge 返回同一状态码的不同包装
 func Merge(c *gin.Context) {
-	SetResponseOK(c, &Item{})
-	SetResponseError(c, 200, errors.New("failed"))
-	SetResponseBusinessError(c, "failed")
+	Send(c, &Item{})
+	SendStatus(c, 200, errors.New("failed"))
+	SendMessage(c, "failed")
 }
 
 // Statuses 返回不同错误状态码
 func Statuses(c *gin.Context) {
-	SetResponseError(c, 400, errors.New("bad request"))
-	SetResponseError(c, 500, errors.New("internal error"))
+	SendStatus(c, 400, errors.New("bad request"))
+	SendStatus(c, 500, errors.New("internal error"))
 }
 
 // DynamicStatus 返回运行期状态码
 func DynamicStatus(c *gin.Context) {
-	SetResponseError(c, runtimeStatus(), errors.New("failed"))
+	SendStatus(c, runtimeStatus(), errors.New("failed"))
 }
 
 // runtimeStatus 模拟运行期状态码
@@ -109,14 +109,14 @@ func runtimeCondition() bool {
 	return true
 }
 
-// SetResponseOK 模拟统一成功响应
-func SetResponseOK(*gin.Context, any) {}
+// Send 模拟固定状态 JSON 响应
+func Send(*gin.Context, any) {}
 
-// SetResponseError 模拟统一错误响应
-func SetResponseError(*gin.Context, int, error) {}
+// SendStatus 模拟动态状态 JSON 响应
+func SendStatus(*gin.Context, int, error) {}
 
-// SetResponseBusinessError 模拟统一业务错误响应
-func SetResponseBusinessError(*gin.Context, string) {}
+// SendMessage 模拟无数据 JSON 响应
+func SendMessage(*gin.Context, string) {}
 
 // SendBinary 模拟配置化二进制响应 Helper
 func SendBinary(*gin.Context, []byte) {}

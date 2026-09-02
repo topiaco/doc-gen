@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 
@@ -37,6 +38,17 @@ func TestRunVersion(t *testing.T) {
 	}
 	if got, want := stdout.String(), "apidoc-gen dev\n"; got != want {
 		t.Fatalf("version output = %q, want %q", got, want)
+	}
+}
+
+// TestBuildVersion 验证发布安装时输出 Go Build Info 中的 Module 标签
+func TestBuildVersion(t *testing.T) {
+	info := &debug.BuildInfo{Main: debug.Module{Version: "v0.1.0"}}
+	if got := buildVersion(info, true); got != "v0.1.0" {
+		t.Fatalf("buildVersion() = %q, want v0.1.0", got)
+	}
+	if got := buildVersion(&debug.BuildInfo{}, true); got != "dev" {
+		t.Fatalf("buildVersion() = %q, want dev", got)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 
 	"github.com/topiaco/doc-gen/internal/analyzer"
 	"github.com/topiaco/doc-gen/internal/config"
@@ -16,8 +17,6 @@ import (
 )
 
 const appName = "apidoc-gen"
-
-var version = "dev"
 
 // main 运行 API 文档生成命令
 func main() {
@@ -36,7 +35,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		writeUsage(stdout)
 		return 0
 	case "version", "-v", "--version":
-		fmt.Fprintf(stdout, "%s %s\n", appName, version)
+		fmt.Fprintf(stdout, "%s %s\n", appName, currentVersion())
 		return 0
 	case "generate":
 		return runGenerate(args[1:], stdout, stderr)
@@ -55,6 +54,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 		writeUsage(stderr)
 		return 2
 	}
+}
+
+// currentVersion 从 Go Build Info 读取安装时的 Module 标签
+func currentVersion() string {
+	return buildVersion(debug.ReadBuildInfo())
+}
+
+func buildVersion(info *debug.BuildInfo, ok bool) string {
+	if !ok || info.Main.Version == "" || info.Main.Version == "(devel)" {
+		return "dev"
+	}
+	return info.Main.Version
 }
 
 // runCheckOverrides 分析源码并校验所有 Override

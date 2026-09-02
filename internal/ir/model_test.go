@@ -80,8 +80,8 @@ func TestTypeRefString(t *testing.T) {
 
 // TestSourceAndSymbolString 验证源码位置和符号的展示格式
 func TestSourceAndSymbolString(t *testing.T) {
-	source := SourceRef{File: "controller/receipt.go", Line: 42, Column: 7}
-	if got := source.String(); got != "controller/receipt.go:42:7" {
+	source := SourceRef{File: "handler/item.go", Line: 42, Column: 7}
+	if got := source.String(); got != "handler/item.go:42:7" {
 		t.Fatalf("SourceRef.String() = %q", got)
 	}
 
@@ -93,8 +93,8 @@ func TestSourceAndSymbolString(t *testing.T) {
 
 // TestOperationKey 验证 Operation 暴露精确接口键
 func TestOperationKey(t *testing.T) {
-	operation := Operation{Method: "POST", Path: "/api/document/receipt/list"}
-	if got := operation.Key().String(); got != "POST /api/document/receipt/list" {
+	operation := Operation{Method: "POST", Path: "/items"}
+	if got := operation.Key().String(); got != "POST /items" {
 		t.Fatalf("Operation.Key() = %q", got)
 	}
 }

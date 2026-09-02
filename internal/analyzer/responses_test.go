@@ -57,9 +57,9 @@ func fixtureResponseFunctions() []config.ResponseFunction {
 	statusArgument := 1
 	dataArgument := 1
 	return []config.ResponseFunction{
-		{Symbol: "fixture/responses.SetResponseOK", Kind: "json", Status: 200, DataArgument: &dataArgument, Wrapper: "success", DataTarget: true},
-		{Symbol: "fixture/responses.SetResponseError", Kind: "json", StatusArgument: &statusArgument, Wrapper: "error"},
-		{Symbol: "fixture/responses.SetResponseBusinessError", Kind: "json", Status: 200, Wrapper: "business"},
+		{Symbol: "fixture/responses.Send", Kind: "json", Status: 200, DataArgument: &dataArgument, Wrapper: "success", DataTarget: true},
+		{Symbol: "fixture/responses.SendStatus", Kind: "json", StatusArgument: &statusArgument, Wrapper: "error"},
+		{Symbol: "fixture/responses.SendMessage", Kind: "json", Status: 200, Wrapper: "business"},
 		{Symbol: "fixture/responses.SendBinary", Kind: "binary", Status: 200, MediaType: "application/octet-stream"},
 	}
 }

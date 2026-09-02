@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.x'
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            examples/minimal/go.sum
+
+      - name: Test
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build -o /tmp/apidoc-gen ./cmd/apidoc-gen
+
+      - name: Check deterministic generation
+        run: |
+          /tmp/apidoc-gen generate --project-root ./examples/minimal
+          cp examples/minimal/api-doc/openapi.json /tmp/openapi-first.json
+          cp examples/minimal/api-doc/report.json /tmp/report-first.json
+          /tmp/apidoc-gen generate --project-root ./examples/minimal
+          cmp /tmp/openapi-first.json examples/minimal/api-doc/openapi.json
+          cmp /tmp/report-first.json examples/minimal/api-doc/report.json

@@ -1,0 +1,6 @@
+configVersion: v2
+defaultMode: manual
+operations:
+  "GET /items/{id}":
+    mode: managed
+    reason: minimal example
