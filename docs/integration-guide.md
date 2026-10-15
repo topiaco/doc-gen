@@ -201,6 +201,8 @@ go install "github.com/topiaco/doc-gen/cmd/apidoc-gen@$GENERATOR_REF"
 
 工作流使用业务项目 `go.mod` 中的 Go 版本，安装固定版本的生成器，下载业务依赖，然后执行 `apidoc-gen` 并上传三个生成文件。本地与 CI 使用同一生成命令。
 
+生成器与业务项目可能要求不同的 Go 版本，因此安装生成器的步骤会允许 Go 自动选择所需工具链。该设置只用于安装步骤，后续业务依赖下载和源码分析仍使用项目配置的 Go 版本。
+
 ### 查看 PR 文档
 
 1. 在仓库的 Actions 页面选择对应的 `API Documentation` 执行记录

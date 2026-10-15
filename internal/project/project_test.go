@@ -176,6 +176,16 @@ func TestWorkflowAndModuleDiscovery(t *testing.T) {
 	if err := yaml.Unmarshal(workflow.Data, &parsed); err != nil {
 		t.Fatal(err)
 	}
+	// GitHub 可能设置 GOTOOLCHAIN=local，因此安装生成器时需要允许选择其要求的 Go 版本
+	jobs := parsed["jobs"].(map[string]any)
+	steps := jobs["generate"].(map[string]any)["steps"].([]any)
+	install := steps[2].(map[string]any)
+	if install["env"].(map[string]any)["GOTOOLCHAIN"] != "auto" {
+		t.Fatal("generator installation must work when the project uses an older Go version")
+	}
+	if _, exists := parsed["env"].(map[string]any)["GOTOOLCHAIN"]; exists {
+		t.Fatal("generator installation must not change the toolchain used by project steps")
+	}
 	for _, want := range []string{"pull_request:", "github.event.repository.default_branch", "server/.apidoc/output", `go install "github.com/topiaco/doc-gen/cmd/apidoc-gen@$APIDOC_VERSION"`, "include-hidden-files: true"} {
 		if !strings.Contains(string(workflow.Data), want) {
 			t.Errorf("workflow missing %q", want)

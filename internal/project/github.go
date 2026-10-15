@@ -77,6 +77,8 @@ jobs:
           go-version-file: [[.GoMod]]
           cache-dependency-path: [[.GoSum]]
       - name: Install documentation generator
+        env:
+          GOTOOLCHAIN: auto
         run: go install "github.com/topiaco/doc-gen/cmd/apidoc-gen@$APIDOC_VERSION"
       - name: Download project dependencies
         working-directory: ${{ env.PROJECT_DIR }}
