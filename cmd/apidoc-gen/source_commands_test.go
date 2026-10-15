@@ -67,3 +67,57 @@ func Register(e *gin.Engine){e.GET("/old",Get)}
 		t.Fatalf("validate %d: %s", code, stderr.String())
 	}
 }
+
+// TestGitHubWarningsPreserveMessagePunctuation 验证 GitHub 提示中的正常标点和源码路径分别转义
+func TestGitHubWarningsPreserveMessagePunctuation(t *testing.T) {
+	root := t.TempDir()
+	_, file, _, _ := runtime.Caller(0)
+	stub, err := filepath.Abs(filepath.Join(filepath.Dir(file), "..", "..", "internal", "analyzer", "testdata", "routes", "gin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := "module cli/warnings\ngo 1.25.0\nrequire github.com/gin-gonic/gin v0.0.0\nreplace github.com/gin-gonic/gin => " + filepath.ToSlash(stub) + "\n"
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(module), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := `package example
+import "github.com/gin-gonic/gin"
+// Health 查询服务状态
+func Health(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) }
+// Register 注册服务状态路由
+func Register(e *gin.Engine) { e.GET("/health", Health) }
+`
+	if err := os.WriteFile(filepath.Join(root, "handler,one.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	t.Setenv("GITHUB_ACTIONS", "true")
+	summaryPath := filepath.Join(root, "summary.md")
+	t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"init"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("init %d: %s", code, stderr.String())
+	}
+	if code := run(nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("generate %d: %s", code, stderr.String())
+	}
+	found := false
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if strings.HasPrefix(line, "::warning file=handler%2Cone.go,") {
+			found = true
+			if !strings.HasSuffix(line, "::field has no business description: status") {
+				t.Errorf("GitHub message punctuation was changed: %s", line)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("missing GitHub source annotation: %s", stdout.String())
+	}
+	summary, err := os.ReadFile(summaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(summary, []byte("Generated **1** operations")) || !bytes.Contains(summary, []byte("field has no business description: status")) {
+		t.Fatalf("unexpected GitHub summary: %s", summary)
+	}
+}

@@ -111,7 +111,7 @@ func runSourceGenerate(args []string, stdout, stderr io.Writer, write bool) int 
 	}
 	if os.Getenv("GITHUB_ACTIONS") == "true" {
 		for _, issue := range artifacts.Report.Issues {
-			fmt.Fprintf(stdout, "::warning file=%s,line=%d::%s\n", workflowEscape(filepath.ToSlash(filepath.Join(relativeToGit(resolved), issue.Source.File))), issue.Source.Line, workflowEscape(issue.Message))
+			fmt.Fprintf(stdout, "::warning file=%s,line=%d::%s\n", workflowEscapeProperty(filepath.ToSlash(filepath.Join(relativeToGit(resolved), issue.Source.File))), issue.Source.Line, workflowEscape(issue.Message))
 		}
 		if path := os.Getenv("GITHUB_STEP_SUMMARY"); path != "" {
 			text := fmt.Sprintf("## API documentation\n\nGenerated **%d** operations; excluded %d existing/ignored operations; %d warnings.\n\nDownload the workflow artifact and open `index.html` for the offline reference.\n", summary.Generated, summary.Excluded, summary.Warnings)
@@ -146,7 +146,12 @@ func relativeToGit(root string) string {
 	return "."
 }
 
-// workflowEscape 转义 GitHub Actions 注解中的特殊字符
+// workflowEscape 转义 GitHub Actions 提示文本中的百分号和换行，保留正常标点
 func workflowEscape(s string) string {
-	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A", ",", "%2C", ":", "%3A").Replace(s)
+	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A").Replace(s)
+}
+
+// workflowEscapeProperty 额外转义属性中的逗号和冒号，保证源码路径正确识别
+func workflowEscapeProperty(s string) string {
+	return strings.NewReplacer(",", "%2C", ":", "%3A").Replace(workflowEscape(s))
 }
