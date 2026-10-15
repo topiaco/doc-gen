@@ -6,13 +6,13 @@
 
 ### 准备生成器
 
-构建生成器需要 Go 1.26 或更新版本。在 doc-gen 源码目录执行：
+使用 Go 1.26 或更新版本安装正式版本：
 
 ```bash
-go build -o /tmp/apidoc-gen ./cmd/apidoc-gen
+go install github.com/topiaco/doc-gen/cmd/apidoc-gen@v0.2.0
 ```
 
-下文使用 `apidoc-gen` 表示生成器命令。如果使用上述构建结果，将它写为 `/tmp/apidoc-gen` 即可。如果已经安装生成器并将其所在目录加入 PATH，可以直接使用 `apidoc-gen`。
+默认安装位置是 `go env GOPATH` 输出目录下的 `bin`，如果设置了 `GOBIN`，则使用该目录。将安装目录加入 PATH 后，即可使用 `apidoc-gen` 命令。版本内容见 [v0.2.0 发布说明](https://github.com/topiaco/doc-gen/releases/tag/v0.2.0)。
 
 业务项目不需要引入 doc-gen 的 Go 依赖。但是，生成器需要读取业务项目的类型信息，因此业务代码及其依赖必须能够被 Go 工具加载。分析过程使用只读模块模式，不会修改业务项目的 `go.mod` 或 `go.sum`，也不执行应用、`init` 函数或数据库查询。
 
@@ -159,37 +159,42 @@ func Register(router *gin.Engine) {
 
 ### 创建工作流
 
-如果生成器通过包含当前功能的正式版本号安装，在业务项目中执行：
+安装 `v0.2.0` 后，在业务项目中执行：
 
 ```bash
 apidoc-gen init --existing --github
 ```
 
+工作流会使用当前安装版本，自动将 `APIDOC_VERSION` 写为 `v0.2.0`。因此，本地和 GitHub 使用相同版本，无需填写提交 SHA。
+
 如果这是首次初始化，并且希望全部已有接口也生成文档，则不加 `--existing`。如果已经初始化，重复执行只会沿用已有记录，不会重置它。
-
-源码构建的版本是 `dev`，无法供 GitHub 安装。因此，使用本地源码构建结果时，需要明确指定 doc-gen 的已发布版本号或完整的 40 位提交 SHA：
-
-```bash
-# 将占位值替换为包含当前功能的生成器版本或提交
-GENERATOR_REF='替换为生成器版本或提交'
-apidoc-gen init --existing --github --generator-version "$GENERATOR_REF"
-```
-
-这里指定的是 **doc-gen 生成器的版本或提交**，而不是业务项目的提交。它必须已经存在于生成器的远程仓库，GitHub 才能下载；本地尚未提交或尚未发布到远程仓库的修改无法用于安装。版本号使用 `v主版本.次版本.修订号` 的形式，也支持预发布版本。
-
-旧版生成器不支持 `init`，直接执行 `apidoc-gen` 只会显示帮助，不会生成文档。因此，即使旧版本能够成功安装，也不能用于这个工作流。如果当前实现还没有发布到远程仓库，可以先完成本地初始化和生成，发布后再执行带有 `--github` 的初始化命令；原有接口记录会保留。
-
-通过提交 SHA 安装生成器时，也使用 `--generator-version` 指定完整提交 SHA。工作流会固定使用指定版本；如果要让本地与 CI 使用相同代码，也可以从该版本安装：
-
-```bash
-go install "github.com/topiaco/doc-gen/cmd/apidoc-gen@$GENERATOR_REF"
-```
-
-默认安装位置是 `go env GOPATH` 输出目录下的 `bin`，如果设置了 `GOBIN`，则使用该目录。将安装目录加入 PATH 后，即可使用 `apidoc-gen` 命令。
 
 工具会在 Git 根目录创建 `.github/workflows/api-doc.yml`。如果业务 Module 位于 `server` 等子目录，初始化时添加 `--project-root ./server`，工具会将该目录写入工作流。提交工作流、业务 Module 中的 `.apidoc/state.json` 和 `.gitignore` 即可。
 
-如果该工作流文件已存在且内容不同，命令会提示，不会覆盖它。此时根据提示检查已有工作流，保留仍然需要的步骤，并使用 `apidoc-gen` 作为文档生成命令。
+如果该工作流文件已存在且内容不同，命令会提示，不会覆盖它。已有工作流使用旧提交时，将其中的版本改为：
+
+```yaml
+env:
+  APIDOC_VERSION: "v0.2.0"
+```
+
+保留 `PROJECT_DIR` 和其他已有设置。安装生成器的步骤仍应设置 `GOTOOLCHAIN: auto`，以便业务项目使用较早 Go 版本时也能完成安装。
+
+### 从源码构建时创建工作流
+
+如果需要验证本地修改，可以在 doc-gen 源码目录构建临时命令：
+
+```bash
+go build -o /tmp/apidoc-gen ./cmd/apidoc-gen
+```
+
+源码构建的版本显示为 `dev`，GitHub 无法按这个版本安装。因此，在业务项目中创建工作流时，明确指定正式版本：
+
+```bash
+/tmp/apidoc-gen init --existing --github --generator-version v0.2.0
+```
+
+这里指定的是 GitHub 使用的生成器版本；本地尚未发布的修改不会包含在 `v0.2.0` 中。需要验证另一个已发布提交时，也可以将版本号换成该提交的完整 40 位 SHA。
 
 ### PR 和合并后的行为
 

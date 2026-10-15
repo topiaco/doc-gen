@@ -4,13 +4,13 @@
 
 ## 1. 现有项目首次使用
 
-构建生成器需要 Go 1.26 或更新版本。在 doc-gen 源码目录执行：
+使用 Go 1.26 或更新版本安装正式版本：
 
 ```bash
-go build -o /tmp/apidoc-gen ./cmd/apidoc-gen
+go install github.com/topiaco/doc-gen/cmd/apidoc-gen@v0.2.0
 ```
 
-下文使用 `apidoc-gen` 表示生成器命令。如果使用上述构建结果，将命令中的 `apidoc-gen` 写为 `/tmp/apidoc-gen` 即可。业务项目不需要引入 doc-gen 的 Go 依赖。
+默认安装位置是 `go env GOPATH` 输出目录下的 `bin`，如果设置了 `GOBIN`，则使用该目录。将安装目录加入 PATH 后，即可使用 `apidoc-gen` 命令。业务项目不需要引入 doc-gen 的 Go 依赖。版本内容见 [v0.2.0 发布说明](https://github.com/topiaco/doc-gen/releases/tag/v0.2.0)。
 
 然后在业务项目的 `go.mod` 所在目录执行：
 
@@ -77,23 +77,15 @@ func Register(router *gin.Engine) {
 
 ## 3. GitHub PR 自动生成
 
-如果生成器通过包含当前功能的正式版本号安装，可以执行：
+安装 `v0.2.0` 后，在业务项目中执行：
 
 ```bash
 apidoc-gen init --existing --github
 ```
 
-也可以在首次初始化时使用这条命令，同时创建已有接口记录和工作流。项目已经初始化时，已有记录保持不变。
+工作流会自动固定使用 `v0.2.0`，无需填写提交 SHA。也可以在首次初始化时使用这条命令，同时创建已有接口记录和工作流。项目已经初始化时，已有记录保持不变。
 
-源码构建的版本是 `dev`，GitHub 无法按这个版本安装生成器。因此，使用源码构建结果时，需要明确指定可下载的生成器版本或提交：
-
-```bash
-# 将占位值替换为 doc-gen 的已发布版本号或完整的 40 位提交 SHA
-GENERATOR_REF='替换为生成器版本或提交'
-apidoc-gen init --existing --github --generator-version "$GENERATOR_REF"
-```
-
-该版本或提交必须已经存在于 doc-gen 的远程仓库，并且包含当前功能。旧版生成器不支持 `init`，无参数执行也不会生成文档，因此不能使用旧版标签或提交。当前源码尚未发布到远程仓库时，可以先完成本地生成，发布后再创建工作流。完整设置方法见[使用文档](docs/integration-guide.md#3-github-pr-自动生成)。
+如果已有工作流使用旧提交，将 `.github/workflows/api-doc.yml` 中的 `APIDOC_VERSION` 改为 `v0.2.0` 即可。完整设置和源码构建方式见[使用文档](docs/integration-guide.md#3-github-pr-自动生成)。
 
 将生成的 `.github/workflows/api-doc.yml` 与初始化文件一起提交后：
 
@@ -109,11 +101,11 @@ Actions 摘要会列出生成结果和分析提示。工作流使用固定版本
 - [源码注释约定](docs/source-comments.md)：模型、字段、请求和响应的注释示例
 - [可运行示例](examples/source/main.go)：方法 Handler、跨函数路由分组、`any` 响应函数和泛型
 
-在 doc-gen 源码目录可以直接生成示例文档：
+在 doc-gen 源码目录，使用已经安装的生成器生成示例文档：
 
 ```bash
-/tmp/apidoc-gen init --project-root ./examples/source
-/tmp/apidoc-gen --project-root ./examples/source
+apidoc-gen init --project-root ./examples/source
+apidoc-gen --project-root ./examples/source
 ```
 
 然后在浏览器中查看 `examples/source/.apidoc/output/index.html`。示例使用 `init`，因此会为全部接口生成文档。
@@ -125,5 +117,7 @@ Actions 摘要会列出生成结果和分析提示。工作流使用固定版本
 ```bash
 go test ./...
 go vet ./...
-go build ./cmd/apidoc-gen
+go build -o /tmp/apidoc-gen ./cmd/apidoc-gen
 ```
+
+验证本地源码修改时，使用 `/tmp/apidoc-gen` 执行命令。源码构建的版本显示为 `dev`；创建 GitHub 工作流时，可以通过 `--generator-version v0.2.0` 指定正式版本。
