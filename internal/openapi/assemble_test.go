@@ -3,148 +3,54 @@ package openapi
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/topiaco/doc-gen/internal/ir"
+	"github.com/topiaco/doc-gen/internal/schema"
 	"strings"
 	"testing"
-
-	"github.com/topiaco/doc-gen/internal/config"
-	"github.com/topiaco/doc-gen/internal/ir"
-	"github.com/topiaco/doc-gen/internal/override"
-	"github.com/topiaco/doc-gen/internal/schema"
 )
 
-// TestAssembleBuildsManagedDocument 验证核心 OpenAPI 结构和稳定输出
-func TestAssembleBuildsManagedDocument(t *testing.T) {
-	identifier := ir.TypeRef{Kind: ir.TypeBasic, Name: "int64"}
-	name := ir.TypeRef{Kind: ir.TypeBasic, Name: "string"}
-	body := ir.TypeRef{Kind: ir.TypeStruct, Fields: []ir.Field{
-		{Name: "Name", JSONName: "name", Type: name, Required: true},
-	}}
-	item := ir.TypeRef{Kind: ir.TypeStruct, Fields: []ir.Field{
-		{Name: "ID", JSONName: "id", Type: identifier, Required: true},
-		{Name: "Name", JSONName: "name", Type: name},
-	}}
-
-	managed := ir.Operation{
-		Method:      "POST",
-		Path:        "/items/{id}",
-		OperationID: "Item_Save",
-		Tags:        []string{"Items", "Core", "Items"},
-		Mode:        ir.ModeManaged,
-		Parameters: []ir.Parameter{
-			{Name: "trace", Location: ir.ParameterHeader, Type: name},
-			{Name: "id", Location: ir.ParameterPath, Type: identifier},
-			{Name: "status", Location: ir.ParameterQuery, Type: identifier},
-		},
-		RequestBody: &ir.RequestBody{ContentType: "application/json", Required: true, Type: body},
+// TestAssembleSourceResponses 验证源码响应分支、未知响应、参数与稳定输出
+func TestAssembleSourceResponses(t *testing.T) {
+	text := ir.TypeRef{Kind: ir.TypeBasic, Name: "string"}
+	number := ir.TypeRef{Kind: ir.TypeBasic, Name: "int64"}
+	operation := ir.Operation{Method: "GET", Path: "/items/{id}", Mode: ir.ModeManaged,
+		Parameters: []ir.Parameter{{Name: "id", Location: ir.ParameterPath, Type: text}},
 		Responses: []ir.Response{
-			{
-				Status:      200,
-				Description: "Success",
-				Content: []ir.ResponseContent{
-					{MediaType: "application/json", Type: &item, Wrapper: "success", DataTarget: true},
-					{MediaType: "application/json", Wrapper: "error"},
-				},
-			},
-			{
-				Status:      206,
-				Description: "Partial Content",
-				Content: []ir.ResponseContent{
-					{MediaType: "application/json", Type: &item},
-					{MediaType: "application/octet-stream", Binary: true},
-				},
-			},
-		},
-	}
-	applied := override.Result{
-		Operations: []ir.Operation{
-			managed,
-			{Method: "GET", Path: "/manual", Mode: ir.ModeManual},
-			{Method: "GET", Path: "/exports/report.xlsx", Mode: ir.ModeIgnored},
-		},
-		OperationOverrides: map[string]config.OperationOverride{
-			managed.Key().String(): {
-				Parameters: []config.ParameterOverride{{
-					Name: "status", Location: "query",
-					Schema: config.SchemaPatch{Enum: []config.NamedEnumValue{{Value: int64(1), Name: "Active"}}},
-				}},
-				Response: &config.ResponseOverride{
-					Status:  200,
-					Data:    &config.SchemaPatch{Description: "Saved item"},
-					Example: map[string]any{"status": "ok", "payload": map[string]any{"id": 1}},
-					Content: map[string]config.SchemaPatch{
-						"text/plain": {Type: "string"},
-					},
-				},
-			},
-		},
-	}
-	project := config.Project{Name: "Test API", Version: "1.0.0", OpenAPIVersion: "3.0.3"}
-	wrappers := responseWrappers()
-	builder := schema.NewBuilder(nil, nil)
-
-	document, err := Assemble(project, wrappers, applied, builder)
+			{Status: 200, Content: []ir.ResponseContent{{MediaType: "application/json", Type: &text}, {MediaType: "application/json", Type: &number}}},
+			{Status: 206, Content: []ir.ResponseContent{{MediaType: "application/octet-stream", Binary: true}}},
+			{Status: 0, Description: "无法从源码确定响应结构"},
+		}}
+	operations := []ir.Operation{operation, {Method: "GET", Path: "/existing", Mode: ir.ModeManual}}
+	info := Info{Title: "Example", Version: "unversioned"}
+	doc, err := Assemble(info, operations, schema.NewBuilder(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := Assemble(project, wrappers, applied, builder)
-	if err != nil {
-		t.Fatal(err)
+	paths := decodeDocument(t, doc.JSON)["paths"].(map[string]any)
+	if len(paths) != 1 {
+		t.Fatalf("unexpected paths: %#v", paths)
 	}
-	if !bytes.Equal(document.JSON, second.JSON) {
-		t.Fatal("repeated assembly produced different JSON")
+	get := paths[operation.Path].(map[string]any)["get"].(map[string]any)
+	if !get["parameters"].([]any)[0].(map[string]any)["required"].(bool) {
+		t.Fatal("path parameter must be required")
 	}
-	if !bytes.HasSuffix(document.JSON, []byte("\n")) {
-		t.Fatal("OpenAPI JSON does not end with a newline")
+	responses := get["responses"].(map[string]any)
+	if responses["default"] == nil {
+		t.Fatal("unknown status was not retained")
 	}
-
-	decoded := decodeDocument(t, document.JSON)
-	paths := decoded["paths"].(map[string]any)
-	if len(paths) != 1 || paths["/manual"] != nil || paths["/exports/report.xlsx"] != nil {
-		t.Fatalf("paths = %#v, want only managed path", paths)
+	variants := responses["200"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)["anyOf"].([]any)
+	if len(variants) != 2 {
+		t.Fatalf("response variants: %#v", variants)
 	}
-	operation := paths["/items/{id}"].(map[string]any)["post"].(map[string]any)
-	if operation["operationId"] != "Item_Save" {
-		t.Fatalf("operationId = %v", operation["operationId"])
+	if !strings.Contains(string(doc.JSON), `"format": "binary"`) {
+		t.Fatal("binary content missing")
 	}
-	tags := operation["tags"].([]any)
-	if len(tags) != 2 || tags[0] != "Core" || tags[1] != "Items" {
-		t.Fatalf("tags = %#v", tags)
+	repeated, err := Assemble(info, operations, schema.NewBuilder(nil))
+	if err != nil || !bytes.Equal(doc.JSON, repeated.JSON) {
+		t.Fatalf("unstable document: %v", err)
 	}
-	parameters := operation["parameters"].([]any)
-	assertParameter(t, parameters, "path", "id", true)
-	assertParameter(t, parameters, "query", "status", false)
-	assertParameter(t, parameters, "header", "trace", false)
-	statusParameter := findParameter(t, parameters, "query", "status")
-	statusSchema := statusParameter["schema"].(map[string]any)
-	if values := statusSchema["enum"].([]any); len(values) != 1 || values[0] != float64(1) {
-		t.Fatalf("status enum = %#v", values)
-	}
-
-	responses := operation["responses"].(map[string]any)
-	successContent := responses["200"].(map[string]any)["content"].(map[string]any)
-	if _, found := successContent["text/plain"]; !found {
-		t.Fatalf("200 content = %#v, want text/plain override", successContent)
-	}
-	successSchema := successContent["application/json"].(map[string]any)["schema"].(map[string]any)
-	successExample := successContent["application/json"].(map[string]any)["example"].(map[string]any)
-	if successExample["status"] != "ok" || successExample["payload"].(map[string]any)["id"] != float64(1) {
-		t.Fatalf("200 response example = %#v", successExample)
-	}
-	if variants := successSchema["oneOf"].([]any); len(variants) != 2 {
-		t.Fatalf("200 response variants = %d, want 2", len(variants))
-	} else if !hasDataDescription(variants, "Saved item") {
-		t.Fatalf("200 response does not contain overridden data schema: %#v", variants)
-	}
-	partialContent := responses["206"].(map[string]any)["content"].(map[string]any)
-	if len(partialContent) != 2 {
-		t.Fatalf("206 content = %#v, want JSON and binary", partialContent)
-	}
-	binarySchema := partialContent["application/octet-stream"].(map[string]any)["schema"].(map[string]any)
-	if binarySchema["type"] != "string" || binarySchema["format"] != "binary" {
-		t.Fatalf("binary schema = %#v", binarySchema)
-	}
-	if err := Validate(document.JSON); err != nil {
-		t.Fatal(err)
+	if _, err := Assemble(info, []ir.Operation{operation, operation}, schema.NewBuilder(nil)); err == nil {
+		t.Fatal("duplicate route accepted")
 	}
 }
 
@@ -162,10 +68,9 @@ func TestAssembleBuildsFormBody(t *testing.T) {
 		Responses: []ir.Response{{Status: 204, Description: "No Content"}},
 	}
 	document, err := Assemble(
-		config.Project{Name: "Upload API", Version: "1", OpenAPIVersion: "3.0.3"},
-		nil,
-		override.Result{Operations: []ir.Operation{operation}},
-		schema.NewBuilder(nil, nil),
+		Info{Title: "Upload API", Version: "1"},
+		[]ir.Operation{operation},
+		schema.NewBuilder(nil),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -190,65 +95,4 @@ func decodeDocument(t *testing.T, data []byte) map[string]any {
 		t.Fatal(err)
 	}
 	return result
-}
-
-// assertParameter 校验一个 OpenAPI 参数
-func assertParameter(t *testing.T, parameters []any, location, name string, required bool) {
-	t.Helper()
-	parameter := findParameter(t, parameters, location, name)
-	if parameter["required"] != required {
-		t.Fatalf("%s %s required = %v, want %v", location, name, parameter["required"], required)
-	}
-}
-
-// findParameter 查找一个 OpenAPI 参数
-func findParameter(t *testing.T, parameters []any, location, name string) map[string]any {
-	t.Helper()
-	for _, candidate := range parameters {
-		parameter := candidate.(map[string]any)
-		if parameter["in"] == location && parameter["name"] == name {
-			return parameter
-		}
-	}
-	t.Fatalf("parameter %s %s was not found", location, name)
-	return nil
-}
-
-// hasDataDescription 判断统一响应是否包含指定动态字段说明
-func hasDataDescription(variants []any, description string) bool {
-	for _, candidate := range variants {
-		variant := candidate.(map[string]any)
-		properties, found := variant["properties"].(map[string]any)
-		if !found {
-			continue
-		}
-		data, found := properties["payload"].(map[string]any)
-		status, statusFound := properties["status"].(map[string]any)
-		values, valuesFound := status["enum"].([]any)
-		if found && statusFound && valuesFound && len(values) == 1 && values[0] == "ok" && data["description"] == description {
-			return true
-		}
-	}
-	return false
-}
-
-// responseWrappers 返回不依赖业务字段名的测试响应包装
-func responseWrappers() map[string]config.ResponseWrapper {
-	wrapper := func(status string) config.ResponseWrapper {
-		return config.ResponseWrapper{
-			DataProperty: "payload",
-			Schema: map[string]any{
-				"type":     "object",
-				"required": []any{"status", "payload"},
-				"properties": map[string]any{
-					"status":  map[string]any{"type": "string", "enum": []any{status}},
-					"payload": map[string]any{},
-				},
-			},
-		}
-	}
-	return map[string]config.ResponseWrapper{
-		"success": wrapper("ok"),
-		"error":   wrapper("error"),
-	}
 }

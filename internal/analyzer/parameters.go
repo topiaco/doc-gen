@@ -1,13 +1,12 @@
 package analyzer
 
 import (
+	"github.com/topiaco/doc-gen/internal/ir"
 	"go/ast"
 	"go/constant"
+	"go/token"
 	"go/types"
 	"strings"
-
-	"github.com/topiaco/doc-gen/internal/config"
-	"github.com/topiaco/doc-gen/internal/ir"
 )
 
 var ginParameterReaders = map[string]struct {
@@ -22,155 +21,7 @@ var ginParameterReaders = map[string]struct {
 	"FormFile":     {location: ir.ParameterForm, format: "binary"},
 }
 
-// AnalyzeParameters 分析每个已定位 Handler 的参数读取
-func AnalyzeParameters(program *Program, resolutions []HandlerResolution, helpers []config.ParameterHelper) []HandlerResolution {
-	helperBySymbol := make(map[string]config.ParameterHelper, len(helpers))
-	for _, helper := range helpers {
-		helperBySymbol[helper.Symbol] = helper
-	}
-
-	results := make([]HandlerResolution, len(resolutions))
-	copy(results, resolutions)
-	for i := range results {
-		if results[i].Declaration == nil || results[i].Diagnostic != nil {
-			continue
-		}
-		analyzeHandlerParameters(program, &results[i], helperBySymbol)
-	}
-	return results
-}
-
-// analyzeHandlerParameters 分析单个 Handler 并补齐未读取的 Path 参数
-func analyzeHandlerParameters(program *Program, result *HandlerResolution, helpers map[string]config.ParameterHelper) {
-	info := result.Package.TypesInfo
-	requiredCalls := immediateRequiredCalls(result.Declaration.Body, info)
-	parameterIndexes := map[string]int{}
-
-	ast.Inspect(result.Declaration.Body, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		parameter, found, diagnostic := parameterFromCall(program, result, call, helpers)
-		if diagnostic != nil {
-			result.Operation.Diagnostics = append(result.Operation.Diagnostics, *diagnostic)
-		}
-		if !found {
-			return true
-		}
-		if parameter.Location == ir.ParameterPath {
-			parameter.Required = true
-		} else if requiredCalls[call] {
-			parameter.Required = true
-			parameter.Confidence = ir.ConfidenceInferred
-		}
-
-		key := string(parameter.Location) + "\x00" + parameter.Name
-		if index, exists := parameterIndexes[key]; exists {
-			if parameter.Required {
-				result.Operation.Parameters[index].Required = true
-				result.Operation.Parameters[index].Confidence = parameter.Confidence
-			}
-			return true
-		}
-		parameterIndexes[key] = len(result.Operation.Parameters)
-		result.Operation.Parameters = append(result.Operation.Parameters, parameter)
-		return true
-	})
-
-	for _, name := range pathParameterNames(result.Operation.Path) {
-		key := string(ir.ParameterPath) + "\x00" + name
-		if _, found := parameterIndexes[key]; found {
-			continue
-		}
-		result.Operation.Parameters = append(result.Operation.Parameters, ir.Parameter{
-			Name:       name,
-			Location:   ir.ParameterPath,
-			Origin:     "route.path",
-			Required:   true,
-			Type:       ir.TypeRef{Kind: ir.TypeBasic, Name: "string"},
-			Confidence: ir.ConfidenceUnknown,
-			Source:     result.Operation.Source,
-		})
-		result.Operation.Diagnostics = append(result.Operation.Diagnostics, ir.Diagnostic{
-			Code:     "parameter.path_not_read",
-			Severity: ir.SeverityWarning,
-			Message:  "route path parameter is not read by handler: " + name,
-			Source:   result.Operation.Source,
-		})
-	}
-}
-
-// parameterFromCall 将直接读取或配置 Helper 调用转换为参数
-func parameterFromCall(program *Program, result *HandlerResolution, call *ast.CallExpr, helpers map[string]config.ParameterHelper) (ir.Parameter, bool, *ir.Diagnostic) {
-	info := result.Package.TypesInfo
-	if selector, ok := call.Fun.(*ast.SelectorExpr); ok && isGinType(info.TypeOf(selector.X), "Context") {
-		reader, found := ginParameterReaders[selector.Sel.Name]
-		if !found || len(call.Args) == 0 {
-			return ir.Parameter{}, false, nil
-		}
-		name, exact := constantString(info, call.Args[0])
-		if !exact {
-			return ir.Parameter{}, false, dynamicParameterDiagnostic(program, call.Args[0])
-		}
-		return ir.Parameter{
-			Name:       name,
-			Location:   reader.location,
-			Origin:     "gin.Context." + selector.Sel.Name,
-			Type:       ir.TypeRef{Kind: ir.TypeBasic, Name: "string"},
-			Format:     reader.format,
-			Confidence: ir.ConfidenceExact,
-			Source:     program.SourceRef(call.Pos()),
-		}, true, nil
-	}
-
-	object := expressionObject(info, call.Fun)
-	if object == nil || object.Pkg() == nil {
-		return ir.Parameter{}, false, nil
-	}
-	symbol := object.Pkg().Path() + "." + object.Name()
-	helper, found := helpers[symbol]
-	if !found || helper.NameArgument >= len(call.Args) {
-		return ir.Parameter{}, false, nil
-	}
-	name, exact := constantString(info, call.Args[helper.NameArgument])
-	if !exact {
-		return ir.Parameter{}, false, dynamicParameterDiagnostic(program, call.Args[helper.NameArgument])
-	}
-	return ir.Parameter{
-		Name:       name,
-		Location:   ir.ParameterLocation(helper.Location),
-		Origin:     symbol,
-		Required:   helper.Location == string(ir.ParameterPath),
-		Type:       helperType(helper.Type),
-		Format:     helper.Format,
-		Collection: helper.CollectionFormat,
-		Minimum:    helper.Minimum,
-		Confidence: ir.ConfidenceConfigured,
-		Source:     program.SourceRef(call.Pos()),
-	}, true, nil
-}
-
-// helperType 将配置类型转换为中间类型
-func helperType(name string) ir.TypeRef {
-	if name == "array" {
-		item := ir.TypeRef{Kind: ir.TypeBasic, Name: "string"}
-		return ir.TypeRef{Kind: ir.TypeSlice, Element: &item}
-	}
-	return ir.TypeRef{Kind: ir.TypeBasic, Name: name}
-}
-
-// dynamicParameterDiagnostic 创建动态参数名诊断
-func dynamicParameterDiagnostic(program *Program, expression ast.Expr) *ir.Diagnostic {
-	return &ir.Diagnostic{
-		Code:     "parameter.dynamic_name",
-		Severity: ir.SeverityWarning,
-		Message:  "parameter name is not a compile-time string constant",
-		Source:   program.SourceRef(expression.Pos()),
-	}
-}
-
-// immediateRequiredCalls 标记赋值后立即检查为空的参数读取
+// immediateRequiredCalls 仅在缺失分支返回 HTTP 客户端错误并结束 Handler 时标记参数必填
 func immediateRequiredCalls(body *ast.BlockStmt, info *types.Info) map[*ast.CallExpr]bool {
 	required := map[*ast.CallExpr]bool{}
 	ast.Inspect(body, func(node ast.Node) bool {
@@ -184,7 +35,7 @@ func immediateRequiredCalls(body *ast.BlockStmt, info *types.Info) map[*ast.Call
 				continue
 			}
 			check, ok := block.List[i+1].(*ast.IfStmt)
-			if !ok {
+			if !ok || !rejectsMissing(check.Body, info) {
 				continue
 			}
 			for j, expression := range assignment.Rhs {
@@ -199,21 +50,48 @@ func immediateRequiredCalls(body *ast.BlockStmt, info *types.Info) map[*ast.Call
 	return required
 }
 
-// conditionChecksMissing 判断条件是否检查目标为空字符串或长度为零
+// rejectsMissing 判断分支是否明确返回客户端错误并结束当前函数
+func rejectsMissing(body *ast.BlockStmt, info *types.Info) bool {
+	if len(body.List) == 0 {
+		return false
+	}
+	if _, ok := body.List[len(body.List)-1].(*ast.ReturnStmt); !ok {
+		return false
+	}
+	for _, statement := range body.List {
+		expression, ok := statement.(*ast.ExprStmt)
+		if !ok {
+			continue
+		}
+		call, ok := expression.X.(*ast.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			continue
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || !isGinType(info.TypeOf(selector.X), "Context") {
+			continue
+		}
+		switch selector.Sel.Name {
+		case "JSON", "AbortWithStatusJSON", "Status", "AbortWithStatus", "String":
+			value := info.Types[call.Args[0]].Value
+			if value != nil && value.Kind() == constant.Int {
+				status, ok := constant.Int64Val(value)
+				if ok && status >= 400 && status < 500 {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// conditionChecksMissing 只接受直接判断缺失的条件，附带其他条件时不能确定参数始终必填
 func conditionChecksMissing(condition, target ast.Expr, info *types.Info) bool {
-	found := false
-	ast.Inspect(condition, func(node ast.Node) bool {
-		comparison, ok := node.(*ast.BinaryExpr)
-		if !ok || comparison.Op.String() != "==" {
-			return true
-		}
-		if missingComparison(comparison.X, comparison.Y, target, info) || missingComparison(comparison.Y, comparison.X, target, info) {
-			found = true
-			return false
-		}
-		return true
-	})
-	return found
+	if parentheses, ok := condition.(*ast.ParenExpr); ok {
+		return conditionChecksMissing(parentheses.X, target, info)
+	}
+	comparison, ok := condition.(*ast.BinaryExpr)
+	return ok && comparison.Op == token.EQL && (missingComparison(comparison.X, comparison.Y, target, info) || missingComparison(comparison.Y, comparison.X, target, info))
 }
 
 // missingComparison 判断比较式一侧是否检查目标缺失

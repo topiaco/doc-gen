@@ -1,9 +1,0 @@
-configVersion: v2
-defaultMode: manual
-operations:
-  "GET /catalog/{id}":
-    mode: managed
-    reason: 通用测试接口
-  "POST /catalog":
-    mode: managed
-    reason: 通用测试接口

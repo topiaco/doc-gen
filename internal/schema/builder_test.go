@@ -3,7 +3,6 @@ package schema
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,8 +11,8 @@ import (
 	"github.com/topiaco/doc-gen/internal/ir"
 )
 
-// TestBuildPaginationProductItemGolden 验证泛型、嵌入、嵌套和字段元数据
-func TestBuildPaginationProductItemGolden(t *testing.T) {
+// TestBuildPaginationProductItem 验证泛型、嵌入、嵌套和字段元数据
+func TestBuildPaginationProductItem(t *testing.T) {
 	program := loadSchemaFixture(t)
 	item := ir.TypeRef{Kind: ir.TypeNamed, PackagePath: "fixture/schema", Name: "ProductItem"}
 	pointerItem := ir.TypeRef{Kind: ir.TypePointer, Element: &item}
@@ -24,23 +23,32 @@ func TestBuildPaginationProductItemGolden(t *testing.T) {
 		TypeArguments: []ir.TypeRef{pointerItem},
 	}
 
-	result, err := NewBuilder(program, nil).Build(page, ir.SourceRef{})
+	builder := NewBuilder(program)
+	_, err := builder.Build(page, ir.SourceRef{})
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	actual, err := json.MarshalIndent(struct {
-		Schema     any `json:"schema"`
-		Components any `json:"components"`
-	}{Schema: result.Schema, Components: result.Components}, "", "  ")
-	if err != nil {
-		t.Fatalf("json.MarshalIndent() error = %v", err)
+	product := builder.Components()["fixture_schema_ProductItem"].Schema
+	if product == nil || product.Properties["id"].Schema == nil || len(product.AllOf) != 0 {
+		t.Fatalf("embedded JSON fields were not flattened: %#v", product)
 	}
-	expected, err := os.ReadFile(filepath.Join("testdata", "pagination_product_item.golden.json"))
-	if err != nil {
-		t.Fatalf("read golden file: %v\nactual:\n%s", err, actual)
+	if got := *product.Properties["explicit"].Schema.Description; got != "显式说明" {
+		t.Fatalf("description priority: %s", got)
 	}
-	if strings.TrimSpace(string(actual)) != strings.TrimSpace(string(expected)) {
-		t.Fatalf("schema golden mismatch\nactual:\n%s\nexpected:\n%s", actual, expected)
+	if got := *product.Properties["occurred_at"].Schema.Format; got != "date-time" {
+		t.Fatalf("time format: %s", got)
+	}
+	for _, name := range product.Required {
+		if name == "optional" {
+			t.Fatal("omitempty response property became required")
+		}
+	}
+	encoded, err := json.Marshal(builder.Components()[ComponentName(page)])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"$ref":"#/components/schemas/fixture_schema_ProductItem"`) || !strings.Contains(string(encoded), `"nullable":true`) {
+		t.Fatalf("generic pointer item: %s", encoded)
 	}
 }
 
@@ -48,12 +56,13 @@ func TestBuildPaginationProductItemGolden(t *testing.T) {
 func TestBuildRecursiveComponent(t *testing.T) {
 	program := loadSchemaFixture(t)
 	node := ir.TypeRef{Kind: ir.TypeNamed, PackagePath: "fixture/schema", Name: "Node"}
-	result, err := NewBuilder(program, nil).Build(node, ir.SourceRef{})
+	builder := NewBuilder(program)
+	_, err := builder.Build(node, ir.SourceRef{})
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
 	name := ComponentName(node)
-	component, found := result.Components[name]
+	component, found := builder.Components()[name]
 	if !found {
 		t.Fatalf("component %s was not generated", name)
 	}

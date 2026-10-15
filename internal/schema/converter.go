@@ -2,7 +2,6 @@
 package schema
 
 import (
-	"encoding/json"
 	"fmt"
 	"go/types"
 	"reflect"
@@ -13,58 +12,45 @@ import (
 	"github.com/swaggest/openapi-go/openapi3"
 
 	"github.com/topiaco/doc-gen/internal/analyzer"
-	"github.com/topiaco/doc-gen/internal/config"
 	"github.com/topiaco/doc-gen/internal/ir"
 )
 
 // Result 保存 Schema 转换结果
 type Result struct {
-	Schema      openapi3.SchemaOrRef            // OpenAPI Schema
-	Components  map[string]openapi3.SchemaOrRef // 组件 Schema
-	Confidence  ir.Confidence                   // Schema 可信度
-	Diagnostics []ir.Diagnostic                 // 转换诊断
+	Schema      openapi3.SchemaOrRef // OpenAPI Schema
+	Confidence  ir.Confidence        // Schema 可信度
+	Diagnostics []ir.Diagnostic      // 转换诊断
 }
 
 // Builder 维护一次文档构建共享的 Schema 组件
 type Builder struct {
-	program             *analyzer.Program               // 静态源码程序
-	mappings            map[string]config.SchemaMapping // 特殊类型映射
-	components          map[string]openapi3.SchemaOrRef // 已生成组件
-	building            map[string]bool                 // 正在生成的组件
-	componentConfidence map[string]ir.Confidence        // 组件可信度
+	program              *analyzer.Program               // 已加载的源码与类型信息
+	components           map[string]openapi3.SchemaOrRef // 已生成组件
+	building             map[string]bool                 // 正在生成的组件
+	componentConfidence  map[string]ir.Confidence        // 组件可信度
+	componentDiagnostics map[string][]ir.Diagnostic
 }
 
 type converter struct {
 	builder *Builder
 	source  ir.SourceRef
+	request bool
 }
 
 // NewBuilder 创建共享 Component 的 Schema 构建器
-func NewBuilder(program *analyzer.Program, mappings map[string]config.SchemaMapping) *Builder {
+func NewBuilder(program *analyzer.Program) *Builder {
 	return &Builder{
-		program:             program,
-		mappings:            mappings,
-		components:          make(map[string]openapi3.SchemaOrRef),
-		building:            make(map[string]bool),
-		componentConfidence: make(map[string]ir.Confidence),
+		program:              program,
+		components:           make(map[string]openapi3.SchemaOrRef),
+		building:             make(map[string]bool),
+		componentConfidence:  make(map[string]ir.Confidence),
+		componentDiagnostics: make(map[string][]ir.Diagnostic),
 	}
 }
 
-// Convert 将 TypeRef 递归转换为 OpenAPI Schema
-func Convert(value ir.TypeRef, mappings map[string]config.SchemaMapping, source ir.SourceRef) (Result, error) {
-	return NewBuilder(nil, mappings).Build(value, source)
-}
-
-// Build 转换类型并返回当前共享组件
+// Build 按响应序列化规则转换类型，生成的组件由 Builder 统一保存
 func (b *Builder) Build(value ir.TypeRef, source ir.SourceRef) (Result, error) {
-	result, err := converter{builder: b, source: source}.convert(value)
-	if err != nil {
-		return Result{}, err
-	}
-	if len(b.components) > 0 {
-		result.Components = b.components
-	}
-	return result, nil
+	return (converter{builder: b, source: source}).convert(value)
 }
 
 // Components 返回当前已生成的组件
@@ -73,13 +59,58 @@ func (b *Builder) Components() map[string]openapi3.SchemaOrRef {
 }
 
 // convert 根据 TypeRef 类别选择基础转换规则
-func (c converter) convert(value ir.TypeRef) (Result, error) {
+func (c converter) convert(value ir.TypeRef) (result Result, err error) {
+	defer func() {
+		if err == nil && value.Unresolved != "" {
+			schema := editableSchema(&result.Schema)
+			if schema.MapOfAnything == nil {
+				schema.MapOfAnything = map[string]any{}
+			}
+			schema.MapOfAnything["x-apidoc-unresolved"] = value.Unresolved
+			result.Confidence = ir.ConfidenceUnknown
+			result.Diagnostics = append(result.Diagnostics, c.diagnostic("schema.dynamic_map", value.Unresolved))
+		}
+		if err == nil && (value.Format != "" || (value.Description != "" && (value.Kind != ir.TypeNamed || value.SchemaType != ""))) {
+			schema := editableSchema(&result.Schema)
+			if value.Format != "" {
+				schema.WithFormat(value.Format)
+			}
+			if value.Description != "" {
+				schema.WithDescription(value.Description)
+			}
+		}
+	}()
+	if value.SchemaType != "" {
+		return exactSchema(openapi3.SchemaType(value.SchemaType), value.Format), nil
+	}
+	if value.CustomEncoding {
+		return c.freeForm("schema.custom_encoding", "custom or dynamic serialization needs a source type annotation"), nil
+	}
 	switch value.Kind {
+	case ir.TypeNull:
+		result := Result{Schema: freeFormSchema(), Confidence: ir.ConfidenceExact}
+		result.Schema.Schema.WithNullable(true).WithEnum(nil)
+		return result, nil
+	case ir.TypeUnion:
+		result := Result{Schema: freeFormSchema(), Confidence: ir.ConfidenceExact}
+		for _, variant := range value.Variants {
+			converted, err := c.convert(variant)
+			if err != nil {
+				return Result{}, err
+			}
+			result.Schema.Schema.AnyOf = append(result.Schema.Schema.AnyOf, converted.Schema)
+			result.Confidence = mergeConfidence(result.Confidence, converted.Confidence)
+			result.Diagnostics = append(result.Diagnostics, converted.Diagnostics...)
+		}
+		return result, nil
 	case ir.TypeBasic:
 		return c.basic(value.Name), nil
 	case ir.TypePointer:
 		return c.pointer(value)
 	case ir.TypeSlice, ir.TypeArray:
+		if value.Kind == ir.TypeSlice && value.Element != nil && value.Element.Kind == ir.TypeBasic && (value.Element.Name == "uint8" || value.Element.Name == "byte") {
+			return exactSchema(openapi3.SchemaTypeString, "byte"), nil
+		}
 		return c.array(value)
 	case ir.TypeMap:
 		return c.mapSchema(value)
@@ -103,7 +134,9 @@ func (c converter) basic(name string) Result {
 		return exactSchema(openapi3.SchemaTypeString, "")
 	case "bool", "boolean":
 		return exactSchema(openapi3.SchemaTypeBoolean, "")
-	case "int", "int8", "int16", "int32", "rune":
+	case "int":
+		return exactSchema(openapi3.SchemaTypeInteger, "")
+	case "int8", "int16", "int32", "rune":
 		return exactSchema(openapi3.SchemaTypeInteger, "int32")
 	case "int64":
 		return exactSchema(openapi3.SchemaTypeInteger, "int64")
@@ -189,26 +222,16 @@ func (c converter) mapSchema(value ir.TypeRef) (Result, error) {
 	return result, nil
 }
 
-// named 转换时间类型和配置化特殊类型
+// named 将内置序列化类型映射到协议类型，其余具名类型由共享组件表达
 func (c converter) named(value ir.TypeRef) (Result, error) {
-	key := value.PackagePath + "." + value.Name
-	if mapping, found := c.builder.mappings[key]; found {
-		data, err := json.Marshal(mapping.Schema)
-		if err != nil {
-			return Result{}, fmt.Errorf("marshal schema mapping %s: %w", key, err)
-		}
-		var schema openapi3.SchemaOrRef
-		if err := json.Unmarshal(data, &schema); err != nil {
-			return Result{}, fmt.Errorf("decode schema mapping %s: %w", key, err)
-		}
-		result := Result{Schema: schema, Confidence: ir.ConfidenceConfigured}
-		if mapping.Diagnostic {
-			result.Diagnostics = []ir.Diagnostic{c.diagnostic("schema.configured_mapping", "configured schema mapping requires review")}
-		}
-		return result, nil
-	}
 	if value.PackagePath == "time" && value.Name == "Time" {
 		return exactSchema(openapi3.SchemaTypeString, "date-time"), nil
+	}
+	if value.PackagePath == "encoding/json" && value.Name == "Number" {
+		return exactSchema(openapi3.SchemaTypeNumber, ""), nil
+	}
+	if value.PackagePath == "encoding/json" && value.Name == "RawMessage" {
+		return c.freeForm("schema.raw_json", "raw JSON has no declared structure"), nil
 	}
 	if c.builder.program == nil {
 		return c.freeForm("schema.named_type_deferred", "named type requires loaded source"), nil
@@ -216,7 +239,7 @@ func (c converter) named(value ir.TypeRef) (Result, error) {
 	return c.namedComponent(value)
 }
 
-// structSchema 转换 Struct 字段、嵌入关系和元数据
+// structSchema 将已确定的结构体字段、说明和约束转换为 Schema
 func (c converter) structSchema(fields []ir.Field) (Result, error) {
 	result := exactSchema(openapi3.SchemaTypeObject, "")
 	for _, field := range fields {
@@ -224,20 +247,33 @@ func (c converter) structSchema(fields []ir.Field) (Result, error) {
 		if field.Source.File != "" {
 			fieldConverter.source = field.Source
 		}
-		fieldResult, err := fieldConverter.convert(field.Type)
+		fieldType := field.Type
+		if strings.Contains(reflect.StructTag(field.Tag).Get("json"), ",string") {
+			fieldType.SchemaType = "string"
+			fieldType.Format = ""
+		}
+		fieldResult, err := fieldConverter.convert(fieldType)
 		if err != nil {
 			return Result{}, fmt.Errorf("convert field %s: %w", field.Name, err)
 		}
 		result.Confidence = mergeConfidence(result.Confidence, fieldResult.Confidence)
 		result.Diagnostics = append(result.Diagnostics, fieldResult.Diagnostics...)
 
-		if embeddedField(field) {
-			result.Schema.Schema.AllOf = append(result.Schema.Schema.AllOf, fieldResult.Schema)
-			continue
+		if field.Description != "" {
+			editableSchema(&fieldResult.Schema).WithDescription(field.Description)
 		}
-		required, err := applyFieldMetadata(&fieldResult.Schema, field)
-		if err != nil {
-			return Result{}, fmt.Errorf("field %s metadata: %w", field.Name, err)
+		required := field.Required
+		// 请求字段是否必填由绑定校验决定，而响应字段是否始终存在由 JSON 省略规则决定
+		if c.request {
+			if err := c.builder.applyValidation(&fieldResult.Schema, field); err != nil {
+				return Result{}, err
+			}
+		} else {
+			tag := reflect.StructTag(field.Tag).Get("json")
+			required = !strings.Contains(tag, ",omitempty") && !strings.Contains(tag, ",omitzero")
+		}
+		if field.Description == "" && field.Source.File != "" {
+			result.Diagnostics = append(result.Diagnostics, fieldConverter.diagnostic("description.field_missing", "field has no business description: "+field.Name))
 		}
 		name := field.JSONName
 		if name == "" {
@@ -254,12 +290,18 @@ func (c converter) structSchema(fields []ir.Field) (Result, error) {
 // namedComponent 生成具名类型组件并用引用处理循环
 func (c converter) namedComponent(value ir.TypeRef) (Result, error) {
 	name := ComponentName(value)
+	// 同一 Go 模型的请求校验与响应省略规则不同，因此分别缓存组件
+	if c.request {
+		name += "Input"
+	}
 	reference := componentReference(name)
+	// 递归类型的组件已经在生成中，因此返回组件引用，避免再次解析同一类型
 	if c.builder.building[name] {
 		return Result{Schema: reference, Confidence: ir.ConfidenceExact}, nil
 	}
+	// 使用缓存时同时返回已有问题记录，以便报告列出所有受影响接口
 	if confidence, found := c.builder.componentConfidence[name]; found {
-		return Result{Schema: reference, Confidence: confidence}, nil
+		return Result{Schema: reference, Confidence: confidence, Diagnostics: c.builder.componentDiagnostics[name]}, nil
 	}
 
 	c.builder.building[name] = true
@@ -273,8 +315,19 @@ func (c converter) namedComponent(value ir.TypeRef) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if value.Description != "" {
+		editableSchema(&definition.Schema).WithDescription(value.Description)
+	}
+	if value.Description == "" {
+		if pkg := c.builder.program.Package(value.PackagePath); pkg != nil && len(pkg.Syntax) > 0 {
+			if object := pkg.Types.Scope().Lookup(value.Name); object != nil {
+				definition.Diagnostics = append(definition.Diagnostics, ir.Diagnostic{Code: "description.type_missing", Severity: ir.SeverityWarning, Message: "type has no business description: " + value.Name, Source: c.builder.program.SourceRef(object.Pos())})
+			}
+		}
+	}
 	c.builder.components[name] = definition.Schema
 	c.builder.componentConfidence[name] = definition.Confidence
+	c.builder.componentDiagnostics[name] = definition.Diagnostics
 	return Result{
 		Schema:      reference,
 		Confidence:  definition.Confidence,
@@ -440,81 +493,7 @@ func componentReference(name string) openapi3.SchemaOrRef {
 	return openapi3.SchemaOrRef{SchemaReference: &reference}
 }
 
-// embeddedField 判断匿名字段是否沿用 JSON 字段提升规则
-func embeddedField(field ir.Field) bool {
-	jsonTag := reflect.StructTag(field.Tag).Get("json")
-	return field.Embedded && strings.Split(jsonTag, ",")[0] == ""
-}
-
-// applyFieldMetadata 将字段标签和说明应用到属性 Schema
-func applyFieldMetadata(value *openapi3.SchemaOrRef, field ir.Field) (bool, error) {
-	tag := reflect.StructTag(field.Tag)
-	hasMetadata := field.Description != "" || tag.Get("format") != "" || tag.Get("pattern") != "" ||
-		tag.Get("minimum") != "" || tag.Get("maximum") != "" || tag.Get("minLength") != "" ||
-		tag.Get("maxLength") != "" || tag.Get("minItems") != "" || tag.Get("maxItems") != "" || tag.Get("nullable") != ""
-	if hasMetadata {
-		schema := editableSchema(value)
-		if field.Description != "" {
-			schema.WithDescription(field.Description)
-		}
-		if format := tag.Get("format"); format != "" {
-			schema.WithFormat(format)
-		}
-		if pattern := tag.Get("pattern"); pattern != "" {
-			schema.WithPattern(pattern)
-		}
-		if raw := tag.Get("minimum"); raw != "" {
-			minimum, err := strconv.ParseFloat(raw, 64)
-			if err != nil {
-				return false, fmt.Errorf("minimum %q is not a number", raw)
-			}
-			schema.WithMinimum(minimum)
-		}
-		if raw := tag.Get("maximum"); raw != "" {
-			maximum, err := strconv.ParseFloat(raw, 64)
-			if err != nil {
-				return false, fmt.Errorf("maximum %q is not a number", raw)
-			}
-			schema.WithMaximum(maximum)
-		}
-		integerTags := []struct {
-			name  string
-			apply func(int64) *openapi3.Schema
-		}{
-			{name: "minLength", apply: schema.WithMinLength},
-			{name: "maxLength", apply: schema.WithMaxLength},
-			{name: "minItems", apply: schema.WithMinItems},
-			{name: "maxItems", apply: schema.WithMaxItems},
-		}
-		for _, item := range integerTags {
-			if raw := tag.Get(item.name); raw != "" {
-				limit, err := strconv.ParseInt(raw, 10, 64)
-				if err != nil {
-					return false, fmt.Errorf("%s %q is not an integer", item.name, raw)
-				}
-				item.apply(limit)
-			}
-		}
-		if raw := tag.Get("nullable"); raw != "" {
-			nullable, err := strconv.ParseBool(raw)
-			if err != nil {
-				return false, fmt.Errorf("nullable %q is not a boolean", raw)
-			}
-			schema.WithNullable(nullable)
-		}
-	}
-	required := field.Required
-	if raw := tag.Get("required"); raw != "" {
-		explicit, err := strconv.ParseBool(raw)
-		if err != nil {
-			return false, fmt.Errorf("required %q is not a boolean", raw)
-		}
-		required = explicit
-	}
-	return required, nil
-}
-
-// editableSchema 包装引用以承载字段级元数据
+// editableSchema 使用包含引用的 allOf Schema 保存字段说明和约束
 func editableSchema(value *openapi3.SchemaOrRef) *openapi3.Schema {
 	if value.Schema != nil {
 		return value.Schema
@@ -529,11 +508,10 @@ func editableSchema(value *openapi3.SchemaOrRef) *openapi3.Schema {
 // mergeConfidence 合并嵌套 Schema 的最低可信度
 func mergeConfidence(left, right ir.Confidence) ir.Confidence {
 	rank := map[ir.Confidence]int{
-		ir.ConfidenceUnknown:    0,
-		ir.ConfidenceInferred:   1,
-		ir.ConfidenceConfigured: 2,
-		ir.ConfidenceOverride:   3,
-		ir.ConfidenceExact:      4,
+		ir.ConfidenceUnknown:  0,
+		ir.ConfidenceInferred: 1,
+		ir.ConfidenceOverride: 3,
+		ir.ConfidenceExact:    4,
 	}
 	if rank[right] < rank[left] {
 		return right
@@ -541,13 +519,15 @@ func mergeConfidence(left, right ir.Confidence) ir.Confidence {
 	return left
 }
 
-// freeForm 创建自由 Schema 和对应诊断
+// freeForm 创建未限定结构的 Schema，并记录无法确定结构的原因
 func (c converter) freeForm(code, message string) Result {
-	return Result{
+	result := Result{
 		Schema:      freeFormSchema(),
 		Confidence:  ir.ConfidenceUnknown,
 		Diagnostics: []ir.Diagnostic{c.diagnostic(code, message)},
 	}
+	result.Schema.Schema.MapOfAnything = map[string]any{"x-apidoc-unresolved": message}
+	return result
 }
 
 // diagnostic 创建 Schema 转换诊断

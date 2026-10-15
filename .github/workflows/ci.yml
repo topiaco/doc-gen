@@ -10,16 +10,19 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: ['1.26.x', '1.27.x']
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.25.x'
+          go-version: ${{ matrix.go }}
           cache: true
           cache-dependency-path: |
             go.sum
-            examples/minimal/go.sum
+            examples/source/go.sum
 
       - name: Test
         run: go test ./...
@@ -30,11 +33,14 @@ jobs:
       - name: Build
         run: go build -o /tmp/apidoc-gen ./cmd/apidoc-gen
 
-      - name: Check deterministic generation
+      - name: Check source-driven generation
         run: |
-          /tmp/apidoc-gen generate --project-root ./examples/minimal
-          cp examples/minimal/api-doc/openapi.json /tmp/openapi-first.json
-          cp examples/minimal/api-doc/report.json /tmp/report-first.json
-          /tmp/apidoc-gen generate --project-root ./examples/minimal
-          cmp /tmp/openapi-first.json examples/minimal/api-doc/openapi.json
-          cmp /tmp/report-first.json examples/minimal/api-doc/report.json
+          /tmp/apidoc-gen init --project-root ./examples/source
+          /tmp/apidoc-gen --project-root ./examples/source
+          cp examples/source/.apidoc/output/openapi.json /tmp/source-openapi.json
+          cp examples/source/.apidoc/output/report.json /tmp/source-report.json
+          cp examples/source/.apidoc/output/index.html /tmp/source-index.html
+          /tmp/apidoc-gen --project-root ./examples/source
+          cmp /tmp/source-openapi.json examples/source/.apidoc/output/openapi.json
+          cmp /tmp/source-report.json examples/source/.apidoc/output/report.json
+          cmp /tmp/source-index.html examples/source/.apidoc/output/index.html

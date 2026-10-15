@@ -72,3 +72,33 @@ func (*RouterGroup) PUT(string, ...HandlerFunc) {}
 
 // DELETE 注册 DELETE 路由
 func (*RouterGroup) DELETE(string, ...HandlerFunc) {}
+
+// H 表示 Gin 的 JSON 对象类型
+type H map[string]any
+
+// New 创建测试路由对象
+func New() *Engine { return &Engine{} }
+
+// Default 创建默认测试路由对象
+func Default() *Engine { return New() }
+
+// GET 模拟 Engine 注册 GET 路由
+func (*Engine) GET(string, ...HandlerFunc) {}
+
+// POST 模拟 Engine 注册 POST 路由
+func (*Engine) POST(string, ...HandlerFunc) {}
+
+// ShouldBindQuery 模拟查询参数绑定
+func (*Context) ShouldBindQuery(any) error { return nil }
+
+// ShouldBind 模拟根据请求方法和内容类型选择绑定方式
+func (*Context) ShouldBind(any) error { return nil }
+
+// ShouldBindUri 模拟路径参数绑定
+func (*Context) ShouldBindUri(any) error { return nil }
+
+// ShouldBindHeader 模拟请求头参数绑定
+func (*Context) ShouldBindHeader(any) error { return nil }
+
+// AbortWithStatusJSON 模拟终止后续 Handler 并写入 JSON 响应
+func (*Context) AbortWithStatusJSON(int, any) {}

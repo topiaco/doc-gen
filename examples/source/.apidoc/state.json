@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "module": "example.com/doc-gen-source",
+  "title": "example.com/doc-gen-source",
+  "apiVersion": "unversioned",
+  "baseline": []
+}

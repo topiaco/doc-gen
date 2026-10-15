@@ -4,7 +4,6 @@ package analyzer
 import (
 	"context"
 	"fmt"
-	"go/ast"
 	"go/token"
 	"path/filepath"
 	"sort"
@@ -17,11 +16,12 @@ import (
 
 // Program 保存一次静态加载得到的源码和类型信息
 type Program struct {
-	ProjectRoot   string
-	FileSet       *token.FileSet
-	Packages      []*packages.Package
-	byPath        map[string]*packages.Package
-	fieldComments map[token.Pos]string // 字段行尾注释
+	ProjectRoot      string
+	FileSet          *token.FileSet
+	Packages         []*packages.Package
+	byPath           map[string]*packages.Package
+	documents        map[token.Pos]Documentation
+	AnnotationErrors []ir.Diagnostic
 }
 
 // Load 加载指定包的 AST、类型信息和源码位置
@@ -33,11 +33,12 @@ func Load(ctx context.Context, projectRoot string, patterns []string) (*Program,
 
 	fileSet := token.NewFileSet()
 	loaded, err := packages.Load(&packages.Config{
-		Context: ctx,
-		Dir:     root,
-		Fset:    fileSet,
-		Mode:    packages.LoadSyntax | packages.NeedModule,
-		Tests:   false,
+		Context:    ctx,
+		Dir:        root,
+		Fset:       fileSet,
+		Mode:       packages.LoadSyntax | packages.NeedModule,
+		Tests:      false,
+		BuildFlags: []string{"-mod=readonly"},
 	}, patterns...)
 	if err != nil {
 		return nil, fmt.Errorf("load Go packages: %w", err)
@@ -54,23 +55,19 @@ func Load(ctx context.Context, projectRoot string, patterns []string) (*Program,
 		indexPackage(byPath, pkg)
 	}
 
-	return &Program{
-		ProjectRoot:   root,
-		FileSet:       fileSet,
-		Packages:      loaded,
-		byPath:        byPath,
-		fieldComments: collectFieldComments(loaded),
-	}, nil
+	program := &Program{
+		ProjectRoot: root,
+		FileSet:     fileSet,
+		Packages:    loaded,
+		byPath:      byPath,
+	}
+	program.indexDocumentation()
+	return program, nil
 }
 
 // Package 返回指定导入路径的已加载包
 func (p *Program) Package(path string) *packages.Package {
 	return p.byPath[path]
-}
-
-// FieldComment 返回字段的行尾注释
-func (p *Program) FieldComment(pos token.Pos) string {
-	return p.fieldComments[pos]
 }
 
 // SourceRef 将 token 位置转换为项目相对源码位置
@@ -118,28 +115,4 @@ func indexPackage(index map[string]*packages.Package, pkg *packages.Package) {
 	for _, imported := range pkg.Imports {
 		indexPackage(index, imported)
 	}
-}
-
-// collectFieldComments 收集 Struct 字段的行尾注释
-func collectFieldComments(loaded []*packages.Package) map[token.Pos]string {
-	comments := make(map[token.Pos]string)
-	for _, pkg := range loaded {
-		for _, file := range pkg.Syntax {
-			ast.Inspect(file, func(node ast.Node) bool {
-				field, ok := node.(*ast.Field)
-				if !ok || field.Comment == nil {
-					return true
-				}
-				comment := strings.TrimSpace(field.Comment.Text())
-				if len(field.Names) == 0 {
-					comments[field.Pos()] = comment
-				}
-				for _, name := range field.Names {
-					comments[name.Pos()] = comment
-				}
-				return true
-			})
-		}
-	}
-	return comments
 }

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>API 文档</title>
+<style>
+:root{color-scheme:light dark;--bg:#f5f7fa;--paper:#fff;--ink:#172033;--muted:#526078;--line:#dce3ec;--accent:#245ccc;--warn:#865800;--soft:#fff6dc}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 system-ui,-apple-system,sans-serif}header{padding:28px 36px;background:var(--paper);border-bottom:1px solid var(--line)}h1{font-size:27px;margin:0 0 5px;overflow-wrap:anywhere}h2{font-size:20px;margin:0}h3{font-size:16px;margin:24px 0 10px}p{white-space:pre-line;margin:6px 0 12px}a{color:var(--accent)}code{font:13px/1.6 ui-monospace,SFMono-Regular,monospace;overflow-wrap:anywhere}.meta{color:var(--muted);font-size:13px}.layout{display:grid;grid-template-columns:285px minmax(0,1fr);max-width:1500px;margin:auto}aside{padding:24px 18px;position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto}input{width:100%;padding:11px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--ink);font:inherit}nav a{display:block;padding:9px 4px;text-decoration:none;font-size:13px;border-bottom:1px solid var(--line)}main{min-width:0;padding:24px 30px 80px}.operation,.notice{background:var(--paper);padding:24px;border:1px solid var(--line);border-radius:10px;margin-bottom:20px}.method{font:bold 12px ui-monospace,monospace;color:var(--accent);margin-right:9px}.path{font-size:17px}.heading{display:flex;align-items:baseline;gap:5px;flex-wrap:wrap}.schema{border-left:2px solid var(--line);padding-left:14px;margin:8px 0}.field{margin:10px 0}.field-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.type,.badge{font-size:12px;color:var(--muted)}.required{color:var(--accent);font-size:12px}summary{cursor:pointer}.warning{background:var(--soft);color:var(--warn);padding:10px 14px;border-radius:6px;margin:8px 0;overflow-wrap:anywhere}.warning p{margin:0}.empty{padding:32px;color:var(--muted)}.schema p{font-size:14px}table{width:100%;border-collapse:collapse}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:9px}th{font-size:12px;color:var(--muted)}[hidden]{display:none!important}@media(max-width:850px){.layout{display:block}aside{position:static;max-height:240px}main{padding:12px}header{padding:22px}.operation{padding:18px}}@media(prefers-color-scheme:dark){:root{--bg:#101621;--paper:#192231;--ink:#e0e7f2;--muted:#a0aec3;--line:#344158;--accent:#8eb6ff;--warn:#f0cf8c;--soft:#3b301b}}
+</style>
+</head>
+<body>
+<header><h1 id="title">API 文档</h1><div class="meta" id="overview"></div></header>
+<div class="layout"><aside><label for="search" class="meta">搜索接口、字段或说明</label><input id="search" type="search" placeholder="输入路径或业务名称"><nav id="nav"></nav></aside><main id="content"></main></div>
+<script type="application/json" id="spec">{{.Spec}}</script>
+<script type="application/json" id="report">{{.Report}}</script>
+<script>
+'use strict';
+const spec=JSON.parse(document.getElementById('spec').textContent);
+const report=JSON.parse(document.getElementById('report').textContent);
+const content=document.getElementById('content'),nav=document.getElementById('nav');
+const el=(tag,text,cls)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node};
+document.title=spec.info.title+' · API 文档';document.getElementById('title').textContent=spec.info.title;
+document.getElementById('overview').textContent='版本 '+spec.info.version+' · '+report.summary.generated+' 个接口已生成文档 · '+report.summary.excluded+' 个接口未生成文档 · '+report.summary.warnings+' 项分析提示';
+function warning(issue){const box=el('div',undefined,'warning');box.append(el('p',issue.message));const src=issue.source||{};if(src.file)box.append(el('code',src.file+':'+src.line));return box}
+const globalIssues=(report.issues||[]).filter(i=>!i.operations||i.operations.length===0);
+if(globalIssues.length){const box=el('section',undefined,'notice');box.append(el('h2','路由分析提示'));globalIssues.forEach(i=>box.append(warning(i)));content.append(box)}
+function resolve(ref){if(!ref.startsWith('#/'))return null;return ref.slice(2).split('/').reduce((value,key)=>value&&value[key.replace(/~1/g,'/').replace(/~0/g,'~')],spec)}
+function schemaView(schema,seen=new Set()){
+ const box=el('div',undefined,'schema');if(!schema)return box;
+ if(schema.$ref){const name=schema.$ref.split('/').pop();box.append(el('div',name,'meta'));if(seen.has(schema.$ref)){box.append(el('span','递归引用','meta'));return box}const next=new Set(seen);next.add(schema.$ref);const target=resolve(schema.$ref);if(target)box.append(schemaView(target,next));return box}
+ if(schema.description)box.append(el('p',schema.description));
+ if(schema['x-apidoc-unresolved'])box.append(warning({message:'结构尚未确定：'+schema['x-apidoc-unresolved']}));
+ const labels=[];if(schema.type)labels.push(schema.type);if(schema.format)labels.push(schema.format);if(schema.nullable)labels.push('可为 null');
+ for(const [key,label] of Object.entries({minimum:'最小值',maximum:'最大值',minLength:'最短长度',maxLength:'最长长度',minItems:'最少元素',maxItems:'最多元素'}))if(schema[key]!==undefined)labels.push(label+' '+schema[key]);
+ if(schema.enum)labels.push('取值 '+schema.enum.map(v=>JSON.stringify(v)).join(' / '));if(labels.length)box.append(el('div',labels.join(' · '),'type'));
+ for(const kind of ['allOf','anyOf','oneOf'])if(schema[kind]){if(kind!=='allOf')box.append(el('div','可能的结构','meta'));for(const item of schema[kind])box.append(schemaView(item,new Set(seen)))}
+ const required=new Set(schema.required||[]);
+ for(const [name,field] of Object.entries(schema.properties||{})){
+  const row=el('details',undefined,'field');row.open=true;const head=el('summary',undefined,'field-head');head.append(el('code',name));if(field.type)head.append(el('span',field.type,'type'));if(required.has(name))head.append(el('span','必填 / 必有','required'));row.append(head,schemaView(field,new Set(seen)));box.append(row)
+ }
+ if(schema.items){box.append(el('div','数组元素','meta'),schemaView(schema.items,new Set(seen)))}
+ if(schema.additionalProperties&&typeof schema.additionalProperties==='object'){box.append(el('div','其他键的值','meta'),schemaView(schema.additionalProperties,new Set(seen)))}
+ if(Object.keys(schema).length===0)box.append(el('div','未限定结构','meta'));
+ if(schema.example!==undefined)box.append(el('pre',JSON.stringify(schema.example,null,2)));
+ return box;
+}
+const entries=[];let index=0;
+for(const [path,item] of Object.entries(spec.paths||{}))for(const [method,operation] of Object.entries(item)){
+ if(!['get','post','put','patch','delete','options','head','trace'].includes(method))continue;
+ const key=method.toUpperCase()+' '+path,id='operation-'+index++;
+ const article=el('article',undefined,'operation');article.id=id;
+ const heading=el('div',undefined,'heading');heading.append(el('span',method.toUpperCase(),'method'),el('code',path,'path'));article.append(heading);
+ if(operation.summary)article.append(el('h2',operation.summary));if(operation.description)article.append(el('p',operation.description));
+ const analysis=(report.operations||[]).find(o=>o.method+' '+o.path===key);if(analysis&&analysis.source)article.append(el('div',analysis.source.file+':'+analysis.source.line,'meta'));
+ for(const issue of report.issues||[])if((issue.operations||[]).includes(key))article.append(warning(issue));
+ if(operation.parameters&&operation.parameters.length){article.append(el('h3','请求参数'));for(const p of operation.parameters){const row=el('div');const h=el('div',undefined,'field-head');h.append(el('code',p.name),el('span',p.in,'type'));if(p.required)h.append(el('span','必填','required'));row.append(h);if(p.description)row.append(el('p',p.description));row.append(schemaView(p.schema));article.append(row)}}
+ if(operation.requestBody){article.append(el('h3','请求体'));for(const [media,value]of Object.entries(operation.requestBody.content||{})){article.append(el('div',media,'meta'),schemaView(value.schema))}}
+ for(const [status,response]of Object.entries(operation.responses||{})){article.append(el('h3','响应 '+status+(response.description?' · '+response.description:'')));for(const [media,value]of Object.entries(response.content||{})){article.append(el('div',media,'meta'),schemaView(value.schema))}}
+ const link=el('a',key+(operation.summary?' · '+operation.summary:''));link.href='#'+id;nav.append(link);content.append(article);entries.push({article,link,text:article.textContent.toLowerCase()});
+}
+if(!entries.length)content.append(el('div','当前没有需要生成文档的接口。初始化后新增的接口会自动生成文档。','empty'));
+document.getElementById('search').addEventListener('input',event=>{const query=event.target.value.trim().toLowerCase();for(const entry of entries){const hide=!entry.text.includes(query);entry.article.hidden=hide;entry.link.hidden=hide}});
+</script>
+</body>
+</html>
