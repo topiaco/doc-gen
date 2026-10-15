@@ -1,403 +1,223 @@
-# 业务项目接入手册
+# 项目使用说明
 
-本手册适用于 Gin、Go 1.25 和 OpenAPI 3.0.3。业务项目只调用 `apidoc-gen` CLI，不引入 `doc-gen` Go 依赖。除 CI 章节外，以下命令都从包含业务 `go.mod` 的目录执行。
+日常只需维护业务代码和必要的业务注释，然后执行 `apidoc-gen`。以下按照首次使用、本地生成和 GitHub PR 自动生成的顺序说明。
 
-## 1. 确定项目根目录
+## 1. 现有项目首次使用
 
-这里的“项目根目录”是包含业务 `go.mod` 的 Go Module 根目录，不一定是 Git 仓库根目录。
+### 准备生成器
 
-- 单体仓库：通常是 Git 根目录
-- 单仓多应用：例如 Git 根目录下有 `server/` 和 `website/`，项目根目录是 `server/`
-- `api-doc/` 放在项目根目录；只使用前端技术的 `website/` 不需要配置
-- `.github/workflows/` 始终放在 Git 根目录
-
-从 Git 根目录确认 Module。单体仓库将 `PROJECT_DIR` 设为 `.`，`go.mod` 位于 `server/` 时设为 `server`：
+构建生成器需要 Go 1.26 或更新版本。在 doc-gen 源码目录执行：
 
 ```bash
-PROJECT_DIR=server
-go -C "$PROJECT_DIR" list -m
-cd "$PROJECT_DIR"
-go list -m
+go build -o /tmp/apidoc-gen ./cmd/apidoc-gen
 ```
 
-两次输出必须一致。记下该值，后面填写到 `project.module`。不要在不含 `go.mod` 的 Git 根目录直接执行 `go list -m`，也不需要为此新增 `go.mod` 或 `go.work`。
+下文使用 `apidoc-gen` 表示生成器命令。如果使用上述构建结果，将它写为 `/tmp/apidoc-gen` 即可。如果已经安装生成器并将其所在目录加入 PATH，可以直接使用 `apidoc-gen`。
 
-## 2. 安装固定版本
+业务项目不需要引入 doc-gen 的 Go 依赖。但是，生成器需要读取业务项目的类型信息，因此业务代码及其依赖必须能够被 Go 工具加载。分析过程使用只读模块模式，不会修改业务项目的 `go.mod` 或 `go.sum`，也不执行应用、`init` 函数或数据库查询。
 
-```bash
-go install github.com/topiaco/doc-gen/cmd/apidoc-gen@v0.1.0
-APIDOC_BIN_DIR="$(go env GOBIN)"
-if [ -z "$APIDOC_BIN_DIR" ]; then
-  APIDOC_BIN_DIR="$(go env GOPATH)/bin"
-fi
-export PATH="$APIDOC_BIN_DIR:$PATH"
-apidoc-gen version
-```
+### 选择已有接口是否生成文档
 
-期望输出：
+在业务项目的 `go.mod` 所在目录，根据需要选择一种初始化方式：
 
-```text
-apidoc-gen v0.1.0
-```
+| 希望生成哪些接口 | 首次初始化命令 |
+| --- | --- |
+| 只生成今后新增的接口 | `apidoc-gen init --existing` |
+| 已有接口和今后新增的接口都生成 | `apidoc-gen init` |
 
-安装只写入本机 Go Bin 目录，不修改业务项目的 `go.mod` 或 `go.sum`。
+`--existing` 会记录初始化时发现的已有接口，并在生成时排除它们。因此，初始化之后尚未新增接口时，生成结果中没有接口是正常情况。如果只有部分已有接口需要生成文档，可以在这些路由旁添加 `apidoc:include`，示例见下文。
 
-## 3. 创建配置文件
+初始化会创建或修改以下文件：
 
-在项目根目录创建：
-
-```text
-api-doc/
-├── config.yaml
-├── selection.yaml
-└── overrides/
-    └── base.yaml
-```
-
-`api-doc/config.yaml`：
-
-```yaml
-configVersion: v2
-
-project:
-  name: Example API
-  version: 1.0.0
-  module: example.com/app
-  framework: gin
-  openapiVersion: 3.0.3
-
-source:
-  routePackages:
-    - ./router/...
-  analysisPackages:
-    - ./...
-
-files:
-  selection: selection.yaml
-  overrides: overrides
-  output: openapi.json
-  report: report.json
-
-responseWrappers: {}
-responseFunctions: []
-parameterHelpers: []
-schemaMappings: {}
-
-quality:
-  minimumRouteDiscoveryCoverage: 100
-  minimumManagedExactSchemaCoverage: 100
-  failOnDuplicateOperationID: true
-  failOnInvalidOpenAPI: true
-  failOnUnresolvedManagedPath: true
-  failOnUnknownManagedResponse: true
-  failOnOrphanSelection: true
-  failOnOrphanOverride: true
-```
-
-必须修改：
-
-- `project.name` 和 `project.version`
-- `project.module`：必须等于 `go list -m` 输出
-- `source.routePackages`：改成实际注册 Gin 路由的包
-- `source.analysisPackages`：覆盖 Handler、Model 和项目辅助函数
-
-`api-doc/selection.yaml`：
-
-```yaml
-configVersion: v2
-defaultMode: manual
-operations: {}
-```
-
-`api-doc/overrides/base.yaml`：
-
-```yaml
-configVersion: v2
-operations: {}
-schemas: {}
-```
-
-注意：`files.*` 相对于 `api-doc/config.yaml` 所在目录解析，只能使用项目内相对路径。
-
-本手册后续命令统一显式使用 `--config api-doc/config.yaml`。从项目根目录执行且使用默认路径时可以省略该参数；配置文件不在默认路径时必须填写实际的项目内相对路径。
-
-## 4. 配置项目响应规则
-
-直接调用 `gin.Context.JSON` 的项目可以先保持空配置。使用统一响应函数时，必须在主配置中声明 Wrapper 和函数完整符号：
-
-```yaml
-responseWrappers:
-  success:
-    dataProperty: data
-    schema:
-      type: object
-      required: [code, message, data]
-      properties:
-        code:
-          type: integer
-        message:
-          type: string
-        data: {}
-
-responseFunctions:
-  - symbol: example.com/app/respond.OK
-    kind: json
-    status: 200
-    dataArgument: 1
-    wrapper: success
-    dataTarget: true
-```
-
-必须按函数真实签名填写参数下标，下标从 `0` 开始。自定义参数函数、二进制响应和第三方类型映射见 [v2 配置说明](configuration-v2.md)。
-
-## 5. 选择接口纳管策略
-
-先列出发现的路由：
-
-```bash
-apidoc-gen list --config api-doc/config.yaml
-```
-
-选择以下一种策略，不要混用。
-
-### 新项目：全部接口自动纳管
-
-```yaml
-configVersion: v2
-defaultMode: managed
-operations: {}
-```
-
-未显式登记的路由都会进入 OpenAPI。只有确定不生成的接口才单独设置为 `manual` 或 `ignored`。
-
-### 已有项目：只自动纳管后续新增接口
-
-先保持 `defaultMode: manual` 和空 `operations`，确认 `apidoc-gen list --mode manual --config api-doc/config.yaml` 已发现全部存量路由。然后只在首次接入时生成存量 Selection：
-
-```bash
-apidoc-gen list --mode manual --config api-doc/config.yaml | awk -F '\t' '
-BEGIN {
-  print "configVersion: v2"
-  print "defaultMode: managed"
-  print "operations:"
-}
-$1 == "manual" {
-  printf "  \"%s\":\n", $2
-  print "    mode: manual"
-  print "    reason: 存量接口，不纳入自动生成"
-}
-' > api-doc/selection.generated.yaml
-```
-
-检查 `selection.generated.yaml` 的路由数量和内容，把下载文件、健康检查等明确不生成的接口改为 `ignored`，确认无误后替换：
-
-```bash
-mv api-doc/selection.generated.yaml api-doc/selection.yaml
-apidoc-gen validate --config api-doc/config.yaml
-```
-
-此后不要把新接口补成 `manual`。新接口未出现在 Selection 中，会通过 `defaultMode: managed` 自动进入 OpenAPI。删除存量路由时要删除对应 Selection；修改存量路由的 Method 或 Path 时，要同步更新其精确路由键。
-
-### 已有项目：逐条纳管
-
-保持 `defaultMode: manual`，只把确认进入 OpenAPI 的接口显式设置为 `managed`：
-
-```yaml
-operations:
-  "GET /items/{id}":
-    mode: managed
-    reason: 对外接口
-```
-
-- 路由键必须是 `大写 Method + 空格 + 完整 Path`
-- Gin 的 `:id` 在配置中写成 `{id}`
-- `manual` 不进入 OpenAPI
-- `ignored` 用于下载文件、健康检查等明确不生成的接口
-
-## 6. 处理无法静态推断的内容
-
-先查看实际纳管接口，再按需检查某条接口：
-
-```bash
-apidoc-gen list --mode managed --config api-doc/config.yaml
-apidoc-gen explain --config api-doc/config.yaml "GET /items/{id}"
-apidoc-gen list-unresolved --config api-doc/config.yaml
-```
-
-`list-unresolved` 是全量静态分析诊断，会同时列出 `managed`、`manual` 和 `ignored` 的警告，并且出现警告时仍可返回退出码 `0`。它不是验收门禁，也不要求结果为 `0`。`manual` 和 `ignored` 不生成 OpenAPI，其诊断无需处理。
-
-`managed` 接口出现在诊断中时先用 `explain` 复核；只有 `validate` 的 `unknownResponses` 非 `0` 或质量门禁为 `fail` 时必须修正。只有源码无法准确表达的信息才写入 `overrides/base.yaml`。
-
-Override 可补充 `operationId`、Tags、字段约束或动态响应 Schema：
-
-```yaml
-configVersion: v2
-operations:
-  "GET /items/{id}":
-    operationId: get_item
-    tags: [Items]
-    response:
-      status: 200
-      data:
-        $ref: "#/components/schemas/Item"
-schemas:
-  Item:
-    type: object
-    required: [id]
-    properties:
-      id:
-        type: integer
-```
-
-不要在 Override 中重复能够稳定从源码推断的内容。
-
-## 7. 生成和验收
-
-```bash
-go build ./...
-go test ./...
-apidoc-gen list --mode managed --config api-doc/config.yaml
-apidoc-gen check-overrides --config api-doc/config.yaml
-apidoc-gen validate --config api-doc/config.yaml
-apidoc-gen generate --config api-doc/config.yaml
-git diff -- api-doc/openapi.json api-doc/report.json
-```
-
-命令作用：
-
-| 命令 | 用途 | 是否要求无输出 |
+| 文件 | 内容 | 是否提交 |
 | --- | --- | --- |
-| `list --mode managed --config api-doc/config.yaml` | 确认实际生成范围 | 否 |
-| `list-unresolved --config api-doc/config.yaml` | 按需查看所有模式的分析诊断 | 否，且不作为门禁 |
-| `check-overrides --config api-doc/config.yaml` | 校验 Override 引用 | 要求 `errors=0` |
-| `validate --config api-doc/config.yaml` | 执行质量门禁，不写生成文件 | 要求全部 `pass` |
-| `generate --config api-doc/config.yaml` | 通过门禁后写入 OpenAPI 和报告 | 要求退出码为 `0` |
+| `.apidoc/state.json` | Module 名、文档标题、API 版本和已有接口记录 | 是 |
+| `.gitignore` | 增加 `/.apidoc/output/`，排除生成文件 | 是 |
 
-验收要求：
+`state.json` 以“HTTP 方法＋规范化路径”记录已有接口，不包含字段或 Schema，因此无需随模型变化而人工修改。**重复初始化会保留已有记录和文档信息，不会切换生成范围。** 例如，已经执行过 `init --existing`，再执行 `init` 不会让已有接口自动进入文档。
 
-- 构建、测试、`check-overrides`、`validate` 和 `generate` 退出码为 `0`
-- `list --mode managed` 与本次预期纳管范围一致
-- `validate` 中所有质量门禁为 `pass`
-- `validate` 的 `unknownResponses=0`
-- `openapi.json` 和 `report.json` 符合预期
-- 连续执行两次 `generate`，文件内容保持一致
-- 将配置、Overrides、`openapi.json` 和 `report.json` 一起提交
+首次初始化时，可以使用 `--title` 和 `--api-version` 设置文档标题和 API 版本；默认值分别为 Module 名和 `unversioned`：
 
-`list-unresolved` 中仅属于 `manual` 或 `ignored` 的警告不影响验收，不要为清空这些警告增加 Override。
-
-如需固定业务路由数量或关键 Schema，可增加 `api-doc/verify-generated.sh`，在 `validate` 后执行。
-
-## 8. 配置 GitHub Actions
-
-Workflow 必须放在 Git 仓库根目录 `.github/workflows/api-doc.yml`。下面的 `PROJECT_DIR` 填写项目根目录相对 Git 根目录的路径：`go.mod` 在 Git 根目录时填写 `.`，在 `server/` 时填写 `server`。
-
-```yaml
-name: API Documentation
-
-on:
-  pull_request:
-  push:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-env:
-  PROJECT_DIR: server
-
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: ${{ env.PROJECT_DIR }}/go.mod
-          cache-dependency-path: ${{ env.PROJECT_DIR }}/go.sum
-
-      - name: Install generator
-        run: |
-          go install github.com/topiaco/doc-gen/cmd/apidoc-gen@v0.1.0
-          APIDOC_BIN_DIR="$(go env GOBIN)"
-          if [ -z "$APIDOC_BIN_DIR" ]; then
-            APIDOC_BIN_DIR="$(go env GOPATH)/bin"
-          fi
-          test "$("$APIDOC_BIN_DIR/apidoc-gen" version)" = "apidoc-gen v0.1.0"
-          echo "$APIDOC_BIN_DIR" >> "$GITHUB_PATH"
-
-      - name: Build project
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          go build ./...
-          go test ./...
-
-      - name: Check documentation overrides
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: apidoc-gen check-overrides --config api-doc/config.yaml
-
-      - name: Validate documentation
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: apidoc-gen validate --config api-doc/config.yaml
-
-      - name: Generate documentation
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: apidoc-gen generate --config api-doc/config.yaml
-
-      - name: Verify committed artifacts
-        run: |
-          git diff --exit-code -- \
-            "$PROJECT_DIR/api-doc/openapi.json" \
-            "$PROJECT_DIR/api-doc/report.json"
-
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: api-documentation
-          path: |
-            ${{ env.PROJECT_DIR }}/api-doc/openapi.json
-            ${{ env.PROJECT_DIR }}/api-doc/report.json
-          if-no-files-found: error
+```bash
+apidoc-gen init --existing --title '订单 API' --api-version '1.0'
 ```
 
-单仓多应用可增加 `paths` 过滤，但路径必须从 Git 根目录开始，例如 `server/**`。CI 只重新生成并检查，不会自动提交文件；Diff 失败表示开发者尚未提交最新生成产物。
+### 确定业务目录
 
-## 9. 日常工作流程
+在 Module 子目录执行时，工具会向上查找 `go.mod`。从不含 `go.mod` 的仓库根目录执行时，如果仓库中只有一个 Module，工具会自动选择它；如果有多个 Module，则明确指定业务目录：
 
-```text
-修改接口或模型
-→ list --mode managed 确认纳管范围
-→ validate
-→ 仅在 managed 接口无法推断时调整 overrides/base.yaml
-→ generate
-→ 检查并提交生成产物
-→ PR 中由 CI 重复生成并检查 Diff
+```bash
+apidoc-gen init --existing --project-root ./server
 ```
 
-使用 `defaultMode: managed` 时，新增接口不需要修改 Selection。只有明确排除接口，或删除、修改已登记的存量接口时才调整 `selection.yaml`。
+这里的 `server` 是示例目录名，实际使用时替换为业务 Module 的路径。后续生成也可以使用同一个 `--project-root` 参数。
 
-## 10. 接入 Apifox（可选）
+如果初始化时无法确定某条路由的方法或路径，工具会提示源码位置，并记录其余已识别的接口。以后能够识别这条路由时，它会被视为新增接口，因为首次记录中没有它。
 
-`doc-gen` 只生成 OpenAPI，不直接写入 Apifox。应在 CI 校验通过后导入 `api-doc/openapi.json`。
+## 2. 本地生成
 
-- 首次接入先手工导入并核对接口
-- 仍有人工维护接口时，使用智能合并并选择“不删除”旧资源
-- 自动导入只在受信任分支的 `push` 后执行，不在 PR 中使用访问令牌
-- Apifox Token 必须保存在 CI Secret 中，不能写入仓库
+### 生成和查看文档
 
-## 接入完成检查
+在业务项目中执行：
 
-- [ ] `apidoc-gen version` 为固定版本
-- [ ] `project.module` 与 `go list -m` 一致
-- [ ] 项目根目录和 Git 根目录已正确区分
-- [ ] 三份 v2 配置存在且路径均在项目内
-- [ ] 统一响应函数和 Wrapper 已按真实签名配置
-- [ ] 已明确选择 Selection 策略，Managed 路由使用规范化 Method/Path
-- [ ] “只纳管新接口”模式已把全部存量路由显式登记为 `manual` 或 `ignored`
-- [ ] `generate`、`validate`、`check-overrides` 和项目构建通过
-- [ ] `validate` 全部为 `pass` 且 `unknownResponses=0`
-- [ ] 未把 `manual`、`ignored` 的 `list-unresolved` 警告误当成失败
-- [ ] 连续生成无 Diff
-- [ ] Workflow 位于 Git 根目录 `.github/workflows/`
-- [ ] 配置和生成产物已提交
+```bash
+apidoc-gen
+```
+
+如果在仓库根目录为子目录中的 Module 生成文档，则执行：
+
+```bash
+apidoc-gen --project-root ./server
+```
+
+生成器一次完成源码分析、业务注释提取、必要检查和文件输出。结果位于所选 Module 的 `.apidoc/output/`：
+
+| 文件 | 使用方式 |
+| --- | --- |
+| `index.html` | 在浏览器中离线查看，支持搜索接口和字段、查看嵌套结构及问题对应的源码位置 |
+| `openapi.json` | 导入支持 OpenAPI 3.0 的工具 |
+| `report.json` | 查看接口列表、生成数量和分析问题 |
+
+这些文件无需提交。每次修改接口代码或模型注释后，再次执行 `apidoc-gen` 即可更新它们，不需要启动业务服务。
+
+`apidoc-gen generate` 与 `apidoc-gen` 相同。生成过程已经包含检查，因此日常不需要先执行 `validate`；如果只想查看分析结果而不写入文件，可以使用 `apidoc-gen validate`。
+
+### 已有接口和新增接口如何处理
+
+接口由 HTTP 方法和规范化路径共同确定。例如，Gin 的 `GET /orders/:id` 在文档中表示为 `GET /orders/{id}`。
+
+| 代码变化 | 再次生成时的结果 |
+| --- | --- |
+| 新增方法或路径 | 自动为新接口生成文档 |
+| 修改已进入文档的接口参数、响应或说明 | 更新对应文档 |
+| 删除路由 | 从文档中删除对应接口 |
+| 只修改已被 `--existing` 排除的接口实现 | 仍然不生成该接口的文档 |
+| 改变已有接口的方法或路径 | 视为新接口 |
+
+如果希望为某个已有接口生成文档，或者排除某个接口，在对应路由注册前或行尾添加指令：
+
+```go
+// Register 注册订单和内部检查路由
+func Register(router *gin.Engine) {
+    // apidoc:include
+    router.GET("/orders/:id", GetOrder)
+
+    router.GET("/internal/health", Health) // apidoc:ignore
+}
+```
+
+指令只作用于相邻的那条路由注册，因此无需另外维护接口清单。
+
+### 用业务注释说明字段
+
+优先使用普通 Go 注释。下面的请求类型通过实际的 `ShouldBindJSON` 调用用于接口，生成器因此能够确定请求字段和校验规则。示例省略导入和保存订单的业务实现：
+
+```go
+// CreateOrderRequest 创建订单的请求参数
+type CreateOrderRequest struct {
+    CustomerID int64 `json:"customerId" binding:"required"` // 客户 ID
+    Remark string `json:"remark" binding:"max=200"` // 订单备注
+}
+
+// CreateOrder 创建订单
+// 根据客户信息创建订单，可填写备注
+func CreateOrder(c *gin.Context) {
+    var request CreateOrderRequest
+    if err := c.ShouldBindJSON(&request); err != nil {
+        c.Status(http.StatusBadRequest)
+        return
+    }
+    c.Status(http.StatusCreated)
+}
+
+// Register 注册创建订单的路由
+func Register(router *gin.Engine) {
+    router.POST("/orders", CreateOrder)
+}
+```
+
+文档标题为“创建订单”，请求体包含必填的 `customerId` 和长度不超过 200 的 `remark`。这些约束来自 `binding` 标签，字段说明来自行尾注释；无需再维护一份请求 Schema。
+
+同一模型的说明只需在声明处维护一次，所有引用它的接口都会使用。模型、统一响应函数、特殊类型和显式类型注释的完整约定见[源码注释说明](source-comments.md)。
+
+### 根据分析提示修改源码
+
+生成器会根据调用实参、变量赋值、返回类型和泛型分析请求与响应。参数声明为 `any` 时，也会继续分析传入的具体值。如果仍有无法确定的信息，生成结果会明确说明：
+
+| 提示情况 | 生成结果及处理方式 |
+| --- | --- |
+| 缺少业务描述 | 保留结构，提示对应字段；在模型或字段处写明业务含义 |
+| 部分类型无法确定 | 保留已知字段并标明未知部分；必要时用 `apidoc:` 引用已有 Go 类型 |
+| 整个响应无法确定 | 使用注明“无法从源码确定响应结构”的 `default` 响应，不假设成功状态码 |
+| 路由方法或路径无法确定 | 报告源码位置，不生成猜测的接口路径 |
+
+同一模型的问题会合并显示，并列出受影响的接口。工具不会根据字段名称编造业务说明，也不会把数据库的 `not null` 或默认值当作接口约束。
+
+上述提示不会使生成失败。只有源码无法加载、显式指令无效、接口冲突、生成的 OpenAPI 无效或文件写入失败等实际错误才会使命令失败。类型注释可以说明请求或响应结构，但是不能确定只在运行时才知道的路由路径。
+
+## 3. GitHub PR 自动生成
+
+### 创建工作流
+
+如果生成器通过包含当前功能的正式版本号安装，在业务项目中执行：
+
+```bash
+apidoc-gen init --existing --github
+```
+
+如果这是首次初始化，并且希望全部已有接口也生成文档，则不加 `--existing`。如果已经初始化，重复执行只会沿用已有记录，不会重置它。
+
+源码构建的版本是 `dev`，无法供 GitHub 安装。因此，使用本地源码构建结果时，需要明确指定 doc-gen 的已发布版本号或完整的 40 位提交 SHA：
+
+```bash
+# 将占位值替换为包含当前功能的生成器版本或提交
+GENERATOR_REF='替换为生成器版本或提交'
+apidoc-gen init --existing --github --generator-version "$GENERATOR_REF"
+```
+
+这里指定的是 **doc-gen 生成器的版本或提交**，而不是业务项目的提交。它必须已经存在于生成器的远程仓库，GitHub 才能下载；本地尚未提交或尚未发布到远程仓库的修改无法用于安装。版本号使用 `v主版本.次版本.修订号` 的形式，也支持预发布版本。
+
+旧版生成器不支持 `init`，直接执行 `apidoc-gen` 只会显示帮助，不会生成文档。因此，即使旧版本能够成功安装，也不能用于这个工作流。如果当前实现还没有发布到远程仓库，可以先完成本地初始化和生成，发布后再执行带有 `--github` 的初始化命令；原有接口记录会保留。
+
+通过提交 SHA 安装生成器时，也使用 `--generator-version` 指定完整提交 SHA。工作流会固定使用指定版本；如果要让本地与 CI 使用相同代码，也可以从该版本安装：
+
+```bash
+go install "github.com/topiaco/doc-gen/cmd/apidoc-gen@$GENERATOR_REF"
+```
+
+默认安装位置是 `go env GOPATH` 输出目录下的 `bin`，如果设置了 `GOBIN`，则使用该目录。将安装目录加入 PATH 后，即可使用 `apidoc-gen` 命令。
+
+工具会在 Git 根目录创建 `.github/workflows/api-doc.yml`。如果业务 Module 位于 `server` 等子目录，初始化时添加 `--project-root ./server`，工具会将该目录写入工作流。提交工作流、业务 Module 中的 `.apidoc/state.json` 和 `.gitignore` 即可。
+
+如果该工作流文件已存在且内容不同，命令会提示，不会覆盖它。此时根据提示检查已有工作流，保留仍然需要的步骤，并使用 `apidoc-gen` 作为文档生成命令。
+
+### PR 和合并后的行为
+
+| 操作 | GitHub Actions 的行为 |
+| --- | --- |
+| 创建或重新开启 PR、向 PR 提交新代码 | 为本次 PR 检查生成预览文档 |
+| 合并到默认分支，或直接向默认分支提交代码 | 根据默认分支的新提交生成文档 |
+| 在 Actions 中手动执行工作流 | 为所选版本生成文档 |
+
+工作流使用业务项目 `go.mod` 中的 Go 版本，安装固定版本的生成器，下载业务依赖，然后执行 `apidoc-gen` 并上传三个生成文件。本地与 CI 使用同一生成命令。
+
+### 查看 PR 文档
+
+1. 在仓库的 Actions 页面选择对应的 `API Documentation` 执行记录
+2. 查看 Summary 中的生成数量和分析提示
+3. 在 Artifacts 中下载 `api-documentation-<提交 SHA>`
+4. 解压后在浏览器中查看 `index.html`，同一目录还包含 `openapi.json` 和 `report.json`
+
+下载文件的名称包含本次工作流的提交 SHA，可以根据执行记录区分不同版本的文档。文件保留期遵循仓库设置。
+
+当前工作流提供可下载的文档文件，不会自动创建在线预览地址，也不会向 PR 发送评论。代码合并后会重新生成文档，因此默认分支的结果反映的是合并后的代码。
+
+## 旧版项目切换
+
+当前版本已移除旧配置、Selection、Overrides、`--config` 参数，以及 `list`、`explain`、`list-unresolved`、`check-overrides` 命令。
+
+切换时，先在相关模型、字段和 Handler 的注释中保留仍然需要的业务说明。只有无法从代码识别的类型才使用显式指令，具体示例见[源码注释约定](source-comments.md)。
+
+然后按本文的首次使用步骤初始化并生成文档。全部已有接口都需要生成时使用 `init`；只希望默认生成新增接口时使用 `init --existing`，并为个别需要生成的已有接口添加 `apidoc:include`。
+
+比较生成的 OpenAPI 和离线页面，确认接口范围、请求、响应和说明符合预期后，将原工作流改为执行 `apidoc-gen`，并删除业务仓库中已不再使用的旧文档配置。

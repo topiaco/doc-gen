@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/topiaco/doc-gen/internal/config"
 	"github.com/topiaco/doc-gen/internal/ir"
 )
 
@@ -18,7 +17,7 @@ func TestConvertBasicTypes(t *testing.T) {
 	}{
 		{name: "string", typeName: "string", want: map[string]any{"type": "string"}},
 		{name: "boolean", typeName: "bool", want: map[string]any{"type": "boolean"}},
-		{name: "int", typeName: "int", want: map[string]any{"type": "integer", "format": "int32"}},
+		{name: "int", typeName: "int", want: map[string]any{"type": "integer"}},
 		{name: "int32", typeName: "int32", want: map[string]any{"type": "integer", "format": "int32"}},
 		{name: "int64", typeName: "int64", want: map[string]any{"type": "integer", "format": "int64"}},
 		{name: "uint", typeName: "uint", want: map[string]any{"type": "integer", "minimum": float64(0)}},
@@ -29,9 +28,9 @@ func TestConvertBasicTypes(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result, err := Convert(ir.TypeRef{Kind: ir.TypeBasic, Name: test.typeName}, nil, ir.SourceRef{})
+			result, err := NewBuilder(nil).Build(ir.TypeRef{Kind: ir.TypeBasic, Name: test.typeName}, ir.SourceRef{})
 			if err != nil {
-				t.Fatalf("Convert() error = %v", err)
+				t.Fatalf("NewBuilder(nil).Build() error = %v", err)
 			}
 			assertSchemaJSON(t, result, test.want)
 			if result.Confidence != ir.ConfidenceExact || len(result.Diagnostics) != 0 {
@@ -52,9 +51,9 @@ func TestConvertTimePointerAndContainers(t *testing.T) {
 	sliceType := ir.TypeRef{Kind: ir.TypeSlice, Element: &mapType}
 	pointerType := ir.TypeRef{Kind: ir.TypePointer, Element: &sliceType}
 
-	result, err := Convert(pointerType, nil, ir.SourceRef{})
+	result, err := NewBuilder(nil).Build(pointerType, ir.SourceRef{})
 	if err != nil {
-		t.Fatalf("Convert() error = %v", err)
+		t.Fatalf("NewBuilder(nil).Build() error = %v", err)
 	}
 	assertSchemaJSON(t, result, map[string]any{
 		"type":     "array",
@@ -68,15 +67,15 @@ func TestConvertTimePointerAndContainers(t *testing.T) {
 		},
 	})
 
-	timeResult, err := Convert(ir.TypeRef{Kind: ir.TypeNamed, PackagePath: "time", Name: "Time"}, nil, ir.SourceRef{})
+	timeResult, err := NewBuilder(nil).Build(ir.TypeRef{Kind: ir.TypeNamed, PackagePath: "time", Name: "Time"}, ir.SourceRef{})
 	if err != nil {
-		t.Fatalf("Convert(time.Time) error = %v", err)
+		t.Fatalf("NewBuilder(nil).Build(time.Time) error = %v", err)
 	}
 	assertSchemaJSON(t, timeResult, map[string]any{"type": "string", "format": "date-time"})
 
-	arrayResult, err := Convert(ir.TypeRef{Kind: ir.TypeArray, Length: 3, Element: &int64Type}, nil, ir.SourceRef{})
+	arrayResult, err := NewBuilder(nil).Build(ir.TypeRef{Kind: ir.TypeArray, Length: 3, Element: &int64Type}, ir.SourceRef{})
 	if err != nil {
-		t.Fatalf("Convert(array) error = %v", err)
+		t.Fatalf("NewBuilder(nil).Build(array) error = %v", err)
 	}
 	assertSchemaJSON(t, arrayResult, map[string]any{
 		"type":     "array",
@@ -86,15 +85,15 @@ func TestConvertTimePointerAndContainers(t *testing.T) {
 	})
 }
 
-// TestConvertFreeFormAndSpecialMappings 验证自由 Schema、动态 Map 和特殊类型
-func TestConvertFreeFormAndSpecialMappings(t *testing.T) {
+// TestConvertFreeFormAndSourceAnnotations 验证自由 Schema、动态 Map 和源码类型注释
+func TestConvertFreeFormAndSourceAnnotations(t *testing.T) {
 	source := ir.SourceRef{File: "model/example.go", Line: 12}
 	anyType := ir.TypeRef{Kind: ir.TypeInterface, Name: "any"}
-	anyResult, err := Convert(anyType, nil, source)
+	anyResult, err := NewBuilder(nil).Build(anyType, source)
 	if err != nil {
-		t.Fatalf("Convert(any) error = %v", err)
+		t.Fatalf("NewBuilder(nil).Build(any) error = %v", err)
 	}
-	assertSchemaJSON(t, anyResult, map[string]any{})
+	assertSchemaJSON(t, anyResult, map[string]any{"x-apidoc-unresolved": "interface response uses a free-form schema"})
 	assertDiagnostic(t, anyResult, "schema.free_form", source)
 	if anyResult.Confidence != ir.ConfidenceUnknown {
 		t.Fatalf("any confidence = %s", anyResult.Confidence)
@@ -105,9 +104,9 @@ func TestConvertFreeFormAndSpecialMappings(t *testing.T) {
 		Key:     &ir.TypeRef{Kind: ir.TypeBasic, Name: "string"},
 		Element: &anyType,
 	}
-	mapResult, err := Convert(dynamicMap, nil, source)
+	mapResult, err := NewBuilder(nil).Build(dynamicMap, source)
 	if err != nil {
-		t.Fatalf("Convert(map[string]any) error = %v", err)
+		t.Fatalf("NewBuilder(nil).Build(map[string]any) error = %v", err)
 	}
 	assertSchemaJSON(t, mapResult, map[string]any{
 		"type":                 "object",
@@ -118,27 +117,13 @@ func TestConvertFreeFormAndSpecialMappings(t *testing.T) {
 		t.Fatalf("dynamic map confidence = %s", mapResult.Confidence)
 	}
 
-	mappings := map[string]config.SchemaMapping{
-		"gorm.io/datatypes.JSON": {Schema: map[string]any{}, Diagnostic: true},
-		"example.UUID":           {Schema: map[string]any{"type": "string", "format": "uuid"}},
-	}
-	jsonResult, err := Convert(ir.TypeRef{Kind: ir.TypeNamed, PackagePath: "gorm.io/datatypes", Name: "JSON"}, mappings, source)
+	uuidResult, err := NewBuilder(nil).Build(ir.TypeRef{Kind: ir.TypeNamed, Name: "UUID", SchemaType: "string", Format: "uuid"}, source)
 	if err != nil {
-		t.Fatalf("Convert(datatypes.JSON) error = %v", err)
-	}
-	assertSchemaJSON(t, jsonResult, map[string]any{})
-	assertDiagnostic(t, jsonResult, "schema.configured_mapping", source)
-	if jsonResult.Confidence != ir.ConfidenceConfigured {
-		t.Fatalf("configured confidence = %s", jsonResult.Confidence)
-	}
-
-	uuidResult, err := Convert(ir.TypeRef{Kind: ir.TypeNamed, PackagePath: "example", Name: "UUID"}, mappings, source)
-	if err != nil {
-		t.Fatalf("Convert(UUID) error = %v", err)
+		t.Fatal(err)
 	}
 	assertSchemaJSON(t, uuidResult, map[string]any{"type": "string", "format": "uuid"})
-	if len(uuidResult.Diagnostics) != 0 || uuidResult.Confidence != ir.ConfidenceConfigured {
-		t.Fatalf("UUID result = %#v", uuidResult)
+	if len(uuidResult.Diagnostics) != 0 || uuidResult.Confidence != ir.ConfidenceExact {
+		t.Fatalf("UUID result: %#v", uuidResult)
 	}
 }
 

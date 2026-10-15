@@ -14,26 +14,34 @@ import (
 	kinopenapi "github.com/getkin/kin-openapi/openapi3"
 	"github.com/swaggest/openapi-go/openapi3"
 
-	"github.com/topiaco/doc-gen/internal/config"
 	"github.com/topiaco/doc-gen/internal/ir"
-	"github.com/topiaco/doc-gen/internal/override"
 	"github.com/topiaco/doc-gen/internal/schema"
 )
 
 // Document 保存组装后的 OpenAPI 文档
 type Document struct {
-	Spec openapi3.Spec // OpenAPI 结构
-	JSON []byte        // 稳定 JSON 内容
+	JSON []byte // 稳定 JSON 内容
 }
 
-// Assemble 组装 managed 接口并校验 OpenAPI 3.0 文档
-func Assemble(project config.Project, wrappers map[string]config.ResponseWrapper, applied override.Result, builder *schema.Builder) (Document, error) {
+// Info 保存文档标题和业务 API 版本
+type Info struct {
+	Title   string
+	Version string
+}
+
+// Assemble 为选定接口生成 OpenAPI 3.0.3 文档，并校验文档结构
+func Assemble(info Info, operations []ir.Operation, builder *schema.Builder) (Document, error) {
 	paths := make(map[string]openapi3.PathItem)
 	operationIDs := make(map[string]string)
-	operations := managedOperations(applied.Operations)
+	operationKeys := make(map[string]bool)
+	operations = managedOperations(operations)
 
 	for _, operation := range operations {
-		converted, err := buildOperation(operation, applied.OperationOverrides[operation.Key().String()], wrappers, builder)
+		if operationKeys[operation.Key().String()] {
+			return Document{}, fmt.Errorf("duplicate route %s", operation.Key())
+		}
+		operationKeys[operation.Key().String()] = true
+		converted, err := buildOperation(operation, builder)
 		if err != nil {
 			return Document{}, fmt.Errorf("assemble %s: %w", operation.Key(), err)
 		}
@@ -52,15 +60,12 @@ func Assemble(project config.Project, wrappers map[string]config.ResponseWrapper
 	for name, component := range builder.Components() {
 		components[name] = component
 	}
-	for name, component := range applied.Schemas {
-		components[name] = component
-	}
 
 	spec := openapi3.Spec{
-		Openapi: project.OpenAPIVersion,
+		Openapi: "3.0.3",
 		Info: openapi3.Info{
-			Title:   project.Name,
-			Version: project.Version,
+			Title:   info.Title,
+			Version: info.Version,
 		},
 		Paths: openapi3.Paths{MapOfPathItemValues: paths},
 	}
@@ -78,7 +83,7 @@ func Assemble(project config.Project, wrappers map[string]config.ResponseWrapper
 	if err := Validate(data); err != nil {
 		return Document{}, err
 	}
-	return Document{Spec: spec, JSON: data}, nil
+	return Document{JSON: data}, nil
 }
 
 // Validate 使用 kin-openapi 校验完整文档
@@ -114,7 +119,7 @@ func OperationID(method, path string) string {
 	return strings.TrimSuffix(result.String(), "_")
 }
 
-// managedOperations 返回按精确接口键排序的纳管接口
+// managedOperations 选择需要生成文档的接口，再按 HTTP 方法和规范化路径排序
 func managedOperations(operations []ir.Operation) []ir.Operation {
 	result := make([]ir.Operation, 0, len(operations))
 	for _, operation := range operations {
@@ -127,11 +132,8 @@ func managedOperations(operations []ir.Operation) []ir.Operation {
 }
 
 // buildOperation 转换单个接口的参数、请求体和响应
-func buildOperation(operation ir.Operation, patch config.OperationOverride, wrappers map[string]config.ResponseWrapper, builder *schema.Builder) (openapi3.Operation, error) {
-	operationID := operation.OperationID
-	if operationID == "" {
-		operationID = OperationID(operation.Method, operation.Path)
-	}
+func buildOperation(operation ir.Operation, builder *schema.Builder) (openapi3.Operation, error) {
+	operationID := OperationID(operation.Method, operation.Path)
 	result := openapi3.Operation{}
 	result.WithID(operationID)
 	if operation.Summary != "" {
@@ -140,14 +142,16 @@ func buildOperation(operation ir.Operation, patch config.OperationOverride, wrap
 	if operation.Description != "" {
 		result.WithDescription(operation.Description)
 	}
-	result.Tags = sortedUnique(operation.Tags)
+	if len(operation.Diagnostics) > 0 {
+		result.MapOfAnything = map[string]any{"x-apidoc-diagnostics": operation.Diagnostics}
+	}
 
-	parameters, formParameters, err := buildParameters(operation.Parameters, patch.Parameters, builder)
+	parameters, formParameters, err := buildParameters(operation.Parameters, builder)
 	if err != nil {
 		return openapi3.Operation{}, err
 	}
 	result.Parameters = parameters
-	requestBody, err := buildRequestBody(operation.RequestBody, formParameters, patch.Parameters, patch.Body, builder)
+	requestBody, err := buildRequestBody(operation.RequestBody, formParameters, builder)
 	if err != nil {
 		return openapi3.Operation{}, err
 	}
@@ -155,7 +159,7 @@ func buildOperation(operation ir.Operation, patch config.OperationOverride, wrap
 		result.WithRequestBody(openapi3.RequestBodyOrRef{RequestBody: requestBody})
 	}
 
-	responses, err := buildResponses(operation.Responses, patch.Response, wrappers, builder)
+	responses, err := buildResponses(operation.Responses, builder)
 	if err != nil {
 		return openapi3.Operation{}, err
 	}
@@ -163,19 +167,12 @@ func buildOperation(operation ir.Operation, patch config.OperationOverride, wrap
 	return result, nil
 }
 
-// buildParameters 转换 Path、Query、Header 参数并分离 Form 字段
-func buildParameters(parameters []ir.Parameter, patches []config.ParameterOverride, builder *schema.Builder) ([]openapi3.ParameterOrRef, []ir.Parameter, error) {
+// buildParameters 按位置和名称排序参数，并单独返回用于构建请求体的表单字段
+func buildParameters(parameters []ir.Parameter, builder *schema.Builder) ([]openapi3.ParameterOrRef, []ir.Parameter, error) {
 	ordered := append([]ir.Parameter(nil), parameters...)
 	sort.Slice(ordered, func(i, j int) bool {
-		left := string(ordered[i].Location) + "\x00" + ordered[i].Name
-		right := string(ordered[j].Location) + "\x00" + ordered[j].Name
-		return left < right
+		return string(ordered[i].Location)+"\x00"+ordered[i].Name < string(ordered[j].Location)+"\x00"+ordered[j].Name
 	})
-	patchByParameter := make(map[string]config.SchemaPatch, len(patches))
-	for _, patch := range patches {
-		patchByParameter[parameterKey(patch.Location, patch.Name)] = patch.Schema
-	}
-
 	result := make([]openapi3.ParameterOrRef, 0, len(ordered))
 	var formParameters []ir.Parameter
 	for _, parameter := range ordered {
@@ -187,86 +184,51 @@ func buildParameters(parameters []ir.Parameter, patches []config.ParameterOverri
 		if err != nil {
 			return nil, nil, err
 		}
-		converted, err := builder.Build(parameter.Type, parameter.Source)
+		converted, err := builder.BuildParameter(parameter)
 		if err != nil {
 			return nil, nil, fmt.Errorf("parameter %s: %w", parameter.Name, err)
 		}
-		schemaValue := converted.Schema
-		basePatch := config.SchemaPatch{Format: parameter.Format, Minimum: parameter.Minimum}
-		if err := override.ApplySchemaPatch(&schemaValue, basePatch); err != nil {
-			return nil, nil, fmt.Errorf("parameter %s: %w", parameter.Name, err)
-		}
-		if patch, found := patchByParameter[parameterKey(string(parameter.Location), parameter.Name)]; found {
-			if err := override.ApplySchemaPatch(&schemaValue, patch); err != nil {
-				return nil, nil, fmt.Errorf("parameter %s override: %w", parameter.Name, err)
-			}
-		}
-
-		value := openapi3.Parameter{Name: parameter.Name, In: location, Schema: &schemaValue}
+		value := openapi3.Parameter{Name: parameter.Name, In: location, Schema: &converted.Schema}
 		value.WithRequired(parameter.Required || parameter.Location == ir.ParameterPath)
 		if parameter.Description != "" {
 			value.WithDescription(parameter.Description)
-		}
-		if parameter.Collection == "multi" {
-			value.WithStyle("form").WithExplode(true)
 		}
 		result = append(result, openapi3.ParameterOrRef{Parameter: &value})
 	}
 	return result, formParameters, nil
 }
 
-// buildRequestBody 转换 JSON Body 或表单字段
-func buildRequestBody(body *ir.RequestBody, formParameters []ir.Parameter, parameterPatches []config.ParameterOverride, patch *config.SchemaPatch, builder *schema.Builder) (*openapi3.RequestBody, error) {
+// buildRequestBody 根据请求绑定与校验规则生成 JSON 或表单请求体
+func buildRequestBody(body *ir.RequestBody, formParameters []ir.Parameter, builder *schema.Builder) (*openapi3.RequestBody, error) {
 	if body != nil && len(formParameters) > 0 {
 		return nil, fmt.Errorf("JSON body and form parameters cannot be combined")
 	}
 	if body != nil {
-		converted, err := builder.Build(body.Type, body.Source)
+		converted, err := builder.BuildRequest(body.Type, body.Source)
 		if err != nil {
 			return nil, fmt.Errorf("request body: %w", err)
 		}
-		schemaValue := converted.Schema
-		if patch != nil {
-			if err := override.ApplySchemaPatch(&schemaValue, *patch); err != nil {
-				return nil, fmt.Errorf("request body override: %w", err)
-			}
-		}
-		contentType := body.ContentType
-		if contentType == "" {
-			contentType = "application/json"
-		}
-		return &openapi3.RequestBody{
-			Content:  map[string]openapi3.MediaType{contentType: {Schema: &schemaValue}},
-			Required: boolPointer(body.Required),
-		}, nil
+		return &openapi3.RequestBody{Content: map[string]openapi3.MediaType{body.ContentType: {Schema: &converted.Schema}}, Required: boolPointer(body.Required)}, nil
 	}
 	if len(formParameters) == 0 {
 		return nil, nil
 	}
-
 	formSchema := openapi3.Schema{}
 	formSchema.WithType(openapi3.SchemaTypeObject)
 	contentType := "application/x-www-form-urlencoded"
-	patchByParameter := make(map[string]config.SchemaPatch, len(parameterPatches))
-	for _, parameterPatch := range parameterPatches {
-		patchByParameter[parameterKey(parameterPatch.Location, parameterPatch.Name)] = parameterPatch.Schema
-	}
 	for _, parameter := range formParameters {
-		converted, err := builder.Build(parameter.Type, parameter.Source)
+		converted, err := builder.BuildParameter(parameter)
 		if err != nil {
 			return nil, fmt.Errorf("form parameter %s: %w", parameter.Name, err)
 		}
-		fieldSchema := converted.Schema
-		basePatch := config.SchemaPatch{Format: parameter.Format, Description: parameter.Description, Minimum: parameter.Minimum}
-		if err := override.ApplySchemaPatch(&fieldSchema, basePatch); err != nil {
-			return nil, fmt.Errorf("form parameter %s: %w", parameter.Name, err)
-		}
-		if parameterPatch, found := patchByParameter[parameterKey(string(parameter.Location), parameter.Name)]; found {
-			if err := override.ApplySchemaPatch(&fieldSchema, parameterPatch); err != nil {
-				return nil, fmt.Errorf("form parameter %s override: %w", parameter.Name, err)
+		// 表单参数由请求体属性表示，因此将字段说明写入对应属性
+		if parameter.Description != "" {
+			if converted.Schema.Schema == nil {
+				converted.Schema = openapi3.SchemaOrRef{Schema: &openapi3.Schema{AllOf: []openapi3.SchemaOrRef{converted.Schema}}}
 			}
+			converted.Schema.Schema.WithDescription(parameter.Description)
 		}
-		formSchema.WithPropertiesItem(parameter.Name, fieldSchema)
+		formSchema.WithPropertiesItem(parameter.Name, converted.Schema)
 		if parameter.Required {
 			formSchema.Required = append(formSchema.Required, parameter.Name)
 		}
@@ -274,14 +236,11 @@ func buildRequestBody(body *ir.RequestBody, formParameters []ir.Parameter, param
 			contentType = "multipart/form-data"
 		}
 	}
-	return &openapi3.RequestBody{
-		Content:  map[string]openapi3.MediaType{contentType: {Schema: &openapi3.SchemaOrRef{Schema: &formSchema}}},
-		Required: boolPointer(len(formSchema.Required) > 0),
-	}, nil
+	return &openapi3.RequestBody{Content: map[string]openapi3.MediaType{contentType: {Schema: &openapi3.SchemaOrRef{Schema: &formSchema}}}, Required: boolPointer(len(formSchema.Required) > 0)}, nil
 }
 
 // buildResponses 合并同一状态码下的媒体类型和响应变体
-func buildResponses(responses []ir.Response, patch *config.ResponseOverride, wrappers map[string]config.ResponseWrapper, builder *schema.Builder) (openapi3.Responses, error) {
+func buildResponses(responses []ir.Response, builder *schema.Builder) (openapi3.Responses, error) {
 	if len(responses) == 0 {
 		return openapi3.Responses{}, fmt.Errorf("operation has no statically known responses")
 	}
@@ -289,17 +248,21 @@ func buildResponses(responses []ir.Response, patch *config.ResponseOverride, wra
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Status < ordered[j].Status })
 	result := openapi3.Responses{MapOfResponseOrRefValues: make(map[string]openapi3.ResponseOrRef)}
 	for _, response := range ordered {
-		converted, err := buildResponse(response, matchingResponsePatch(response.Status, patch), wrappers, builder)
+		converted, err := buildResponse(response, builder)
 		if err != nil {
 			return openapi3.Responses{}, fmt.Errorf("response %d: %w", response.Status, err)
 		}
-		result.MapOfResponseOrRefValues[strconv.Itoa(response.Status)] = openapi3.ResponseOrRef{Response: &converted}
+		key := strconv.Itoa(response.Status)
+		if response.Status == 0 {
+			key = "default"
+		}
+		result.MapOfResponseOrRefValues[key] = openapi3.ResponseOrRef{Response: &converted}
 	}
 	return result, nil
 }
 
 // buildResponse 转换单个状态码下的全部 Content
-func buildResponse(response ir.Response, patch *config.ResponseOverride, wrappers map[string]config.ResponseWrapper, builder *schema.Builder) (openapi3.Response, error) {
+func buildResponse(response ir.Response, builder *schema.Builder) (openapi3.Response, error) {
 	description := response.Description
 	if description == "" {
 		description = http.StatusText(response.Status)
@@ -314,17 +277,11 @@ func buildResponse(response ir.Response, patch *config.ResponseOverride, wrapper
 
 	contents := append([]ir.ResponseContent(nil), response.Content...)
 	sort.Slice(contents, func(i, j int) bool { return responseContentKey(contents[i]) < responseContentKey(contents[j]) })
-	dataPatchTarget := responseDataPatchTarget(contents)
 	mediaSchemas := make(map[string][]openapi3.SchemaOrRef)
-	for index, content := range contents {
-		converted, err := buildResponseContent(content, wrappers, builder, response.Source)
+	for _, content := range contents {
+		converted, err := buildResponseContent(content, builder, response.Source)
 		if err != nil {
 			return openapi3.Response{}, err
-		}
-		if patch != nil && patch.Data != nil && index == dataPatchTarget {
-			if err := applyDataPatch(&converted, content.Wrapper, wrappers, *patch.Data); err != nil {
-				return openapi3.Response{}, fmt.Errorf("data override: %w", err)
-			}
 		}
 		mediaType := content.MediaType
 		if mediaType == "" {
@@ -336,33 +293,11 @@ func buildResponse(response ir.Response, patch *config.ResponseOverride, wrapper
 	result.Content = make(map[string]openapi3.MediaType, len(mediaSchemas))
 	for mediaType, variants := range mediaSchemas {
 		combined := variants[0]
+		// 各分支的结构可能重叠，因此使用 anyOf 表示响应可以符合其中任意一种结构
 		if len(variants) > 1 {
-			combined = openapi3.SchemaOrRef{Schema: &openapi3.Schema{OneOf: variants}}
+			combined = openapi3.SchemaOrRef{Schema: &openapi3.Schema{AnyOf: variants}}
 		}
-		if patch != nil {
-			if contentPatch, found := patch.Content[mediaType]; found {
-				if err := override.ApplySchemaPatch(&combined, contentPatch); err != nil {
-					return openapi3.Response{}, fmt.Errorf("content %s override: %w", mediaType, err)
-				}
-			}
-		}
-		content := openapi3.MediaType{Schema: &combined}
-		if patch != nil && patch.Example != nil && mediaType == "application/json" {
-			content.WithExample(patch.Example)
-		}
-		result.Content[mediaType] = content
-	}
-	if patch != nil {
-		for mediaType, contentPatch := range patch.Content {
-			if _, found := result.Content[mediaType]; found {
-				continue
-			}
-			contentSchema := openapi3.SchemaOrRef{Schema: &openapi3.Schema{}}
-			if err := override.ApplySchemaPatch(&contentSchema, contentPatch); err != nil {
-				return openapi3.Response{}, fmt.Errorf("content %s override: %w", mediaType, err)
-			}
-			result.Content[mediaType] = openapi3.MediaType{Schema: &contentSchema}
-		}
+		result.Content[mediaType] = openapi3.MediaType{Schema: &combined}
 	}
 	return result, nil
 }
@@ -373,11 +308,11 @@ func responseContentKey(content ir.ResponseContent) string {
 	if content.Type != nil {
 		typeName = content.Type.String()
 	}
-	return content.MediaType + "\x00" + content.Wrapper + "\x00" + typeName + "\x00" + strconv.FormatBool(content.Binary) + "\x00" + strconv.FormatBool(content.DataTarget)
+	return content.MediaType + "\x00" + typeName + "\x00" + strconv.FormatBool(content.Binary)
 }
 
-// buildResponseContent 转换直接、二进制和统一包装响应
-func buildResponseContent(content ir.ResponseContent, wrappers map[string]config.ResponseWrapper, builder *schema.Builder, source ir.SourceRef) (openapi3.SchemaOrRef, error) {
+// buildResponseContent 将源码分析得到的响应类型或二进制标记转换为 Schema
+func buildResponseContent(content ir.ResponseContent, builder *schema.Builder, source ir.SourceRef) (openapi3.SchemaOrRef, error) {
 	if content.Binary {
 		value := openapi3.Schema{}
 		value.WithType(openapi3.SchemaTypeString).WithFormat("binary")
@@ -393,74 +328,7 @@ func buildResponseContent(content ir.ResponseContent, wrappers map[string]config
 	} else {
 		data.Schema.WithNullable(true)
 	}
-	if content.Wrapper == "" {
-		return data, nil
-	}
-	wrapper, found := wrappers[content.Wrapper]
-	if !found {
-		return openapi3.SchemaOrRef{}, fmt.Errorf("unknown response wrapper %q", content.Wrapper)
-	}
-	return wrappedResponse(wrapper, data)
-}
-
-// wrappedResponse 将分析出的数据 Schema 注入配置化响应包装
-func wrappedResponse(wrapper config.ResponseWrapper, data openapi3.SchemaOrRef) (openapi3.SchemaOrRef, error) {
-	encoded, err := json.Marshal(wrapper.Schema)
-	if err != nil {
-		return openapi3.SchemaOrRef{}, fmt.Errorf("marshal response wrapper: %w", err)
-	}
-	var response openapi3.SchemaOrRef
-	if err := json.Unmarshal(encoded, &response); err != nil {
-		return openapi3.SchemaOrRef{}, fmt.Errorf("decode response wrapper: %w", err)
-	}
-	if response.Schema == nil || response.Schema.Properties == nil {
-		return openapi3.SchemaOrRef{}, fmt.Errorf("response wrapper has no properties")
-	}
-	response.Schema.Properties[wrapper.DataProperty] = data
-	return response, nil
-}
-
-// applyDataPatch 将响应 data 覆盖应用到包装或直接 Schema
-func applyDataPatch(target *openapi3.SchemaOrRef, wrapperName string, wrappers map[string]config.ResponseWrapper, patch config.SchemaPatch) error {
-	if wrapperName == "" {
-		return override.ApplySchemaPatch(target, patch)
-	}
-	wrapper, found := wrappers[wrapperName]
-	if !found {
-		return fmt.Errorf("unknown response wrapper %q", wrapperName)
-	}
-	if target.Schema == nil || target.Schema.Properties == nil {
-		return fmt.Errorf("response wrapper has no data property")
-	}
-	data := target.Schema.Properties[wrapper.DataProperty]
-	if err := override.ApplySchemaPatch(&data, patch); err != nil {
-		return err
-	}
-	target.Schema.Properties[wrapper.DataProperty] = data
-	return nil
-}
-
-// responseDataPatchTarget 选择显式数据目标或首个 JSON 响应
-func responseDataPatchTarget(contents []ir.ResponseContent) int {
-	for index, content := range contents {
-		if content.DataTarget {
-			return index
-		}
-	}
-	for index, content := range contents {
-		if !content.Binary {
-			return index
-		}
-	}
-	return -1
-}
-
-// matchingResponsePatch 返回当前状态码对应的覆盖
-func matchingResponsePatch(status int, patch *config.ResponseOverride) *config.ResponseOverride {
-	if patch != nil && patch.Status == status {
-		return patch
-	}
-	return nil
+	return data, nil
 }
 
 // parameterIn 转换受支持的 OpenAPI 参数位置
@@ -477,26 +345,7 @@ func parameterIn(location ir.ParameterLocation) (openapi3.ParameterIn, error) {
 	}
 }
 
-// sortedUnique 返回排序后的非空唯一字符串
-func sortedUnique(values []string) []string {
-	seen := make(map[string]bool, len(values))
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		if value != "" && !seen[value] {
-			seen[value] = true
-			result = append(result, value)
-		}
-	}
-	sort.Strings(result)
-	return result
-}
-
-// parameterKey 返回参数覆盖的精确键
-func parameterKey(location, name string) string {
-	return location + "\x00" + name
-}
-
-// boolPointer 返回布尔值指针
+// boolPointer 为 OpenAPI 中需要区分未设置与 false 的字段创建指针
 func boolPointer(value bool) *bool {
 	return &value
 }

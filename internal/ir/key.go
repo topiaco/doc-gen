@@ -6,43 +6,13 @@ import (
 	"unicode"
 )
 
-// OperationKey 表示 Method 与规范化 Path 组成的精确键
+// OperationKey 使用 HTTP 方法和规范化路径标识接口
 type OperationKey struct {
 	Method string
 	Path   string
 }
 
-// NewOperationKey 从源码路由创建规范化精确键
-func NewOperationKey(method, path string) (OperationKey, error) {
-	if !isUpperMethod(method) {
-		return OperationKey{}, fmt.Errorf("HTTP method %q must contain uppercase letters only", method)
-	}
-
-	normalizedPath, err := NormalizePath(path)
-	if err != nil {
-		return OperationKey{}, err
-	}
-	return OperationKey{Method: method, Path: normalizedPath}, nil
-}
-
-// ParseOperationKey 解析配置中的规范化精确键
-func ParseOperationKey(raw string) (OperationKey, error) {
-	method, path, ok := strings.Cut(raw, " ")
-	if !ok || method == "" || path == "" || strings.Contains(path, " ") {
-		return OperationKey{}, fmt.Errorf("operation key %q must use METHOD + single space + PATH", raw)
-	}
-
-	key, err := NewOperationKey(method, path)
-	if err != nil {
-		return OperationKey{}, err
-	}
-	if key.Path != path {
-		return OperationKey{}, fmt.Errorf("operation path %q must be normalized as %q", path, key.Path)
-	}
-	return key, nil
-}
-
-// String 返回配置使用的精确键格式
+// String 返回 HTTP 方法、空格和规范化路径组成的字符串
 func (k OperationKey) String() string {
 	return k.Method + " " + k.Path
 }
@@ -83,19 +53,6 @@ func NormalizePath(path string) (string, error) {
 		}
 	}
 	return strings.Join(segments, "/"), nil
-}
-
-// isUpperMethod 判断 Method 是否只包含大写英文字母
-func isUpperMethod(method string) bool {
-	if method == "" {
-		return false
-	}
-	for _, r := range method {
-		if r < 'A' || r > 'Z' {
-			return false
-		}
-	}
-	return true
 }
 
 // validOpenAPIParameter 校验完整的 OpenAPI 路径参数片段

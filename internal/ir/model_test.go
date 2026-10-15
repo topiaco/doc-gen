@@ -91,7 +91,7 @@ func TestSourceAndSymbolString(t *testing.T) {
 	}
 }
 
-// TestOperationKey 验证 Operation 暴露精确接口键
+// TestOperationKey 验证 Operation 返回由 HTTP 方法和路径组成的接口标识
 func TestOperationKey(t *testing.T) {
 	operation := Operation{Method: "POST", Path: "/items"}
 	if got := operation.Key().String(); got != "POST /items" {

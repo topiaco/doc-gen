@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// DocumentationMode 表示接口文档的管理方式
+// DocumentationMode 表示接口是否生成文档，以及因存量快照或显式指令排除的情况
 type DocumentationMode string
 
 const (
@@ -19,18 +19,16 @@ const (
 type Confidence string
 
 const (
-	ConfidenceExact      Confidence = "exact"
-	ConfidenceConfigured Confidence = "configured"
-	ConfidenceOverride   Confidence = "override"
-	ConfidenceInferred   Confidence = "inferred"
-	ConfidenceUnknown    Confidence = "unknown"
+	ConfidenceExact    Confidence = "exact"
+	ConfidenceOverride Confidence = "override"
+	ConfidenceInferred Confidence = "inferred"
+	ConfidenceUnknown  Confidence = "unknown"
 )
 
 // DiagnosticSeverity 表示诊断的严重级别
 type DiagnosticSeverity string
 
 const (
-	SeverityInfo    DiagnosticSeverity = "info"
 	SeverityWarning DiagnosticSeverity = "warning"
 	SeverityError   DiagnosticSeverity = "error"
 )
@@ -82,18 +80,26 @@ const (
 	TypeStruct    TypeKind = "struct"
 	TypeInterface TypeKind = "interface"
 	TypeParameter TypeKind = "typeParameter"
+	TypeNull      TypeKind = "null"
+	TypeUnion     TypeKind = "union"
 )
 
 // TypeRef 递归表达静态 Go 类型
 type TypeRef struct {
-	Kind          TypeKind  `json:"kind"`
-	PackagePath   string    `json:"packagePath,omitempty"`
-	Name          string    `json:"name,omitempty"`
-	Element       *TypeRef  `json:"element,omitempty"`
-	Key           *TypeRef  `json:"key,omitempty"`
-	Length        int64     `json:"length,omitempty"`
-	TypeArguments []TypeRef `json:"typeArguments,omitempty"`
-	Fields        []Field   `json:"fields,omitempty"`
+	Kind           TypeKind  `json:"kind"`
+	PackagePath    string    `json:"packagePath,omitempty"`
+	Name           string    `json:"name,omitempty"`
+	Element        *TypeRef  `json:"element,omitempty"`
+	Key            *TypeRef  `json:"key,omitempty"`
+	Length         int64     `json:"length,omitempty"`
+	TypeArguments  []TypeRef `json:"typeArguments,omitempty"`
+	Fields         []Field   `json:"fields,omitempty"`
+	Description    string    `json:"description,omitempty"`
+	SchemaType     string    `json:"schemaType,omitempty"`
+	Format         string    `json:"format,omitempty"`
+	Unresolved     string    `json:"unresolved,omitempty"`
+	CustomEncoding bool      `json:"customEncoding,omitempty"`
+	Variants       []TypeRef `json:"variants,omitempty"`
 }
 
 // String 返回稳定的类型表达式
@@ -113,6 +119,12 @@ func (t TypeRef) String() string {
 		return "map[" + typeString(t.Key) + "]" + typeString(t.Element)
 	case TypeStruct:
 		return t.structString()
+	case TypeUnion:
+		parts := make([]string, len(t.Variants))
+		for i, variant := range t.Variants {
+			parts[i] = variant.String()
+		}
+		return "union[" + strings.Join(parts, ",") + "]"
 	default:
 		return string(TypeUnknown)
 	}
@@ -164,7 +176,6 @@ type Field struct {
 	Tag         string     `json:"tag,omitempty"`         // 原始 Struct 标签
 	Description string     `json:"description,omitempty"` // 字段说明
 	Required    bool       `json:"required,omitempty"`    // 是否必填
-	Embedded    bool       `json:"embedded,omitempty"`    // 是否为嵌入字段
 	Confidence  Confidence `json:"confidence"`            // 元数据可信度
 	Source      SourceRef  `json:"source"`                // 字段源码位置
 }
@@ -188,10 +199,9 @@ type Parameter struct {
 	Required    bool              `json:"required"`
 	Type        TypeRef           `json:"type"`
 	Format      string            `json:"format,omitempty"`
-	Collection  string            `json:"collectionFormat,omitempty"`
-	Minimum     *float64          `json:"minimum,omitempty"`
 	Confidence  Confidence        `json:"confidence"`
 	Source      SourceRef         `json:"source"`
+	Tag         string            `json:"tag,omitempty"`
 }
 
 // RequestBody 表示接口请求体
@@ -205,12 +215,10 @@ type RequestBody struct {
 
 // ResponseContent 表示一个响应媒体类型
 type ResponseContent struct {
-	MediaType  string     `json:"mediaType"`            // 响应媒体类型
-	Type       *TypeRef   `json:"type,omitempty"`       // JSON 数据静态类型
-	Binary     bool       `json:"binary,omitempty"`     // 是否为二进制内容
-	Wrapper    string     `json:"wrapper,omitempty"`    // JSON 包装名称
-	DataTarget bool       `json:"dataTarget,omitempty"` // 是否为响应数据覆盖目标
-	Confidence Confidence `json:"confidence"`           // 内容分析可信度
+	MediaType  string     `json:"mediaType"`        // 响应媒体类型
+	Type       *TypeRef   `json:"type,omitempty"`   // JSON 数据静态类型
+	Binary     bool       `json:"binary,omitempty"` // 是否为二进制内容
+	Confidence Confidence `json:"confidence"`       // 内容分析可信度
 }
 
 // Response 表示一个 HTTP 响应
@@ -236,10 +244,8 @@ type Operation struct {
 	Method      string            `json:"method"`
 	Path        string            `json:"path"`
 	Handler     SymbolRef         `json:"handler"`
-	OperationID string            `json:"operationId,omitempty"`
 	Summary     string            `json:"summary,omitempty"`
 	Description string            `json:"description,omitempty"`
-	Tags        []string          `json:"tags,omitempty"`
 	Parameters  []Parameter       `json:"parameters,omitempty"`
 	RequestBody *RequestBody      `json:"requestBody,omitempty"`
 	Responses   []Response        `json:"responses,omitempty"`
@@ -248,6 +254,7 @@ type Operation struct {
 	Confidence  Confidence        `json:"confidence"`
 	Diagnostics []Diagnostic      `json:"diagnostics,omitempty"`
 	Source      SourceRef         `json:"source"`
+	Selection   string            `json:"selection,omitempty"`
 }
 
 // Key 返回接口的精确匹配键
