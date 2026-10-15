@@ -1,0 +1,41 @@
+name: API Documentation
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_DIR: "examples/source"
+  APIDOC_VERSION: "2a00f8e6443d2f5bc3660f43abc202c4142818c3"
+
+jobs:
+  generate:
+    if: github.event_name != 'push' || github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: "examples/source/go.mod"
+          cache-dependency-path: "examples/source/go.sum"
+      - name: Install documentation generator
+        run: go install "github.com/topiaco/doc-gen/cmd/apidoc-gen@$APIDOC_VERSION"
+      - name: Download project dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: go mod download
+      - name: Generate documentation
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: apidoc-gen
+      - name: Upload documentation
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-documentation-${{ github.sha }}
+          path: "examples/source/.apidoc/output"
+          include-hidden-files: true
+          if-no-files-found: error
