@@ -4,11 +4,20 @@
 
 ## 1. 现有项目首次使用
 
-使用 Go 1.26 或更新版本安装正式版本：
+使用 Git 和 Go 1.26 或更新版本，从发布标签安装：
 
 ```bash
-go install github.com/topiaco/doc-gen/cmd/apidoc-gen@v0.2.0
+(
+  set -e
+  generator_dir=$(mktemp -d)
+  git clone --depth 1 --branch v0.2.0 https://github.com/topiaco/doc-gen.git "$generator_dir"
+  cd "$generator_dir"
+  GOTOOLCHAIN=auto go install ./cmd/apidoc-gen
+)
+apidoc-gen version
 ```
+
+本次 `v0.2.0` 重新发布修复了 map 索引导致的初始化崩溃。Go 模块代理及本地模块缓存可能仍保留旧版本，因此请使用上面的标签源码安装方式更新；无需清空 Go 缓存或关闭依赖校验。版本命令应输出 `apidoc-gen v0.2.0`。
 
 默认安装位置是 `go env GOPATH` 输出目录下的 `bin`，如果设置了 `GOBIN`，则使用该目录。将安装目录加入 PATH 后，即可使用 `apidoc-gen` 命令。业务项目不需要引入 doc-gen 的 Go 依赖。版本内容见 [v0.2.0 发布说明](https://github.com/topiaco/doc-gen/releases/tag/v0.2.0)。
 
@@ -85,7 +94,7 @@ apidoc-gen init --existing --github
 
 工作流会自动固定使用 `v0.2.0`，无需填写提交 SHA。也可以在首次初始化时使用这条命令，同时创建已有接口记录和工作流。项目已经初始化时，已有记录保持不变。
 
-如果已有工作流使用旧提交，将 `.github/workflows/api-doc.yml` 中的 `APIDOC_VERSION` 改为 `v0.2.0` 即可。完整设置和源码构建方式见[使用文档](docs/integration-guide.md#3-github-pr-自动生成)。
+已有工作流需要将 `APIDOC_VERSION` 改为 `v0.2.0`，并将生成器安装步骤改为从 Git 标签源码安装，避免使用缓存中的旧包。完整安装步骤和源码构建方式见[使用文档](docs/integration-guide.md#3-github-pr-自动生成)。
 
 将生成的 `.github/workflows/api-doc.yml` 与初始化文件一起提交后：
 
@@ -120,4 +129,4 @@ go vet ./...
 go build -o /tmp/apidoc-gen ./cmd/apidoc-gen
 ```
 
-验证本地源码修改时，使用 `/tmp/apidoc-gen` 执行命令。源码构建的版本显示为 `dev`；创建 GitHub 工作流时，可以通过 `--generator-version v0.2.0` 指定正式版本。
+验证本地源码修改时，使用 `/tmp/apidoc-gen` 执行命令。源码构建可能显示 Git 推导的版本、带 `+dirty` 的版本或 `dev`；创建 GitHub 工作流时，可以通过 `--generator-version v0.2.0` 指定正式版本。

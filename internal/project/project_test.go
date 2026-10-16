@@ -183,10 +183,20 @@ func TestWorkflowAndModuleDiscovery(t *testing.T) {
 	if install["env"].(map[string]any)["GOTOOLCHAIN"] != "auto" {
 		t.Fatal("generator installation must work when the project uses an older Go version")
 	}
+	// 同版本重新发布后必须读取 Git 标签源码，不能继续安装模块代理缓存中的旧包
+	installScript := install["run"].(string)
+	for _, want := range []string{`git clone --quiet https://github.com/topiaco/doc-gen.git "$generator_dir"`, `git -C "$generator_dir" checkout --quiet --detach "$APIDOC_VERSION"`, "go install ./cmd/apidoc-gen"} {
+		if !strings.Contains(installScript, want) {
+			t.Errorf("generator installation missing %q", want)
+		}
+	}
+	if strings.Contains(installScript, "cmd/apidoc-gen@") {
+		t.Fatal("generator installation must not reuse a cached module release")
+	}
 	if _, exists := parsed["env"].(map[string]any)["GOTOOLCHAIN"]; exists {
 		t.Fatal("generator installation must not change the toolchain used by project steps")
 	}
-	for _, want := range []string{"pull_request:", "github.event.repository.default_branch", "server/.apidoc/output", `go install "github.com/topiaco/doc-gen/cmd/apidoc-gen@$APIDOC_VERSION"`, "include-hidden-files: true"} {
+	for _, want := range []string{"pull_request:", "github.event.repository.default_branch", "server/.apidoc/output", "include-hidden-files: true"} {
 		if !strings.Contains(string(workflow.Data), want) {
 			t.Errorf("workflow missing %q", want)
 		}

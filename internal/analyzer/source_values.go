@@ -224,7 +224,8 @@ func (f *sourceFrame) expression(expr ast.Expr) *sourceValue {
 		if key, ok := stringValue(index); ok && target.fields[key] != nil {
 			return target.fields[key]
 		}
-		if index.constant != nil {
+		// 未知 map 元素保留声明类型，非整数键不能传给 Int64Val
+		if index.constant != nil && index.constant.Kind() == constant.Int {
 			if n, ok := constant.Int64Val(index.constant); ok && n >= 0 && n < int64(len(target.items)) {
 				return target.items[n]
 			}

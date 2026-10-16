@@ -6,11 +6,20 @@
 
 ### 准备生成器
 
-使用 Go 1.26 或更新版本安装正式版本：
+使用 Git 和 Go 1.26 或更新版本，从发布标签安装：
 
 ```bash
-go install github.com/topiaco/doc-gen/cmd/apidoc-gen@v0.2.0
+(
+  set -e
+  generator_dir=$(mktemp -d)
+  git clone --depth 1 --branch v0.2.0 https://github.com/topiaco/doc-gen.git "$generator_dir"
+  cd "$generator_dir"
+  GOTOOLCHAIN=auto go install ./cmd/apidoc-gen
+)
+apidoc-gen version
 ```
+
+本次 `v0.2.0` 重新发布修复了 map 索引导致的初始化崩溃。Go 模块代理及本地模块缓存可能仍保留旧版本，因此请使用上面的标签源码安装方式更新；无需清空 Go 缓存或关闭依赖校验。版本命令应输出 `apidoc-gen v0.2.0`。
 
 默认安装位置是 `go env GOPATH` 输出目录下的 `bin`，如果设置了 `GOBIN`，则使用该目录。将安装目录加入 PATH 后，即可使用 `apidoc-gen` 命令。版本内容见 [v0.2.0 发布说明](https://github.com/topiaco/doc-gen/releases/tag/v0.2.0)。
 
@@ -178,7 +187,21 @@ env:
   APIDOC_VERSION: "v0.2.0"
 ```
 
-保留 `PROJECT_DIR` 和其他已有设置。安装生成器的步骤仍应设置 `GOTOOLCHAIN: auto`，以便业务项目使用较早 Go 版本时也能完成安装。
+保留 `PROJECT_DIR` 和其他已有设置，将 `Install documentation generator` 步骤更新为：
+
+```yaml
+      - name: Install documentation generator
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          generator_dir=$(mktemp -d)
+          git clone --quiet https://github.com/topiaco/doc-gen.git "$generator_dir"
+          git -C "$generator_dir" checkout --quiet --detach "$APIDOC_VERSION"
+          cd "$generator_dir"
+          go install ./cmd/apidoc-gen
+```
+
+这会从指定 Git 标签或提交构建生成器，避免同版本重新发布时使用 Go 模块缓存中的旧代码。`GOTOOLCHAIN: auto` 允许业务项目使用较早 Go 版本时自动选择生成器所需的工具链。依赖仍按 `go.sum` 正常校验。
 
 ### 从源码构建时创建工作流
 
@@ -188,7 +211,7 @@ env:
 go build -o /tmp/apidoc-gen ./cmd/apidoc-gen
 ```
 
-源码构建的版本显示为 `dev`，GitHub 无法按这个版本安装。因此，在业务项目中创建工作流时，明确指定正式版本：
+源码构建可能显示 Git 推导的版本、带 `+dirty` 的版本或 `dev`。在业务项目中创建工作流时，明确指定已发布的标签或提交：
 
 ```bash
 /tmp/apidoc-gen init --existing --github --generator-version v0.2.0
