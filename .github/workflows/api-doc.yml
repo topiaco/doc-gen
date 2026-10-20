@@ -10,7 +10,7 @@ permissions:
 
 env:
   PROJECT_DIR: "examples/source"
-  APIDOC_VERSION: "v0.2.0"
+  APIDOC_VERSION: "v0.2.1"
 
 jobs:
   generate:

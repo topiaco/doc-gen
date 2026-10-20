@@ -274,6 +274,13 @@ func (f *sourceFrame) composite(expr *ast.CompositeLit) *sourceValue {
 			}
 			v.fields[name] = f.expression(expression)
 		}
+		// 字面量中省略的接口字段为 nil，已赋值的字段仍按实际值推断
+		for i := 0; i < t.NumFields(); i++ {
+			field := t.Field(i)
+			if _, ok := types.Unalias(field.Type()).(*types.Interface); ok && v.fields[field.Name()] == nil {
+				v.fields[field.Name()] = &sourceValue{typ: field.Type(), ref: ir.TypeRef{Kind: ir.TypeNull}, source: f.engine.program.SourceRef(field.Pos())}
+			}
+		}
 	case *types.Map:
 		v.fields = map[string]*sourceValue{}
 		for _, element := range expr.Elts {
