@@ -102,6 +102,7 @@ func (c converter) convert(value ir.TypeRef) (result Result, err error) {
 			result.Confidence = mergeConfidence(result.Confidence, converted.Confidence)
 			result.Diagnostics = append(result.Diagnostics, converted.Diagnostics...)
 		}
+		c.builder.PrioritizeNonNullVariants(result.Schema.Schema.AnyOf)
 		return result, nil
 	case ir.TypeBasic:
 		return c.basic(value.Name), nil

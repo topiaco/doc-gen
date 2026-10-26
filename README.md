@@ -7,13 +7,13 @@
 使用 Go 1.26 或更新版本安装：
 
 ```bash
-GOTOOLCHAIN=auto go install github.com/topiaco/doc-gen/cmd/apidoc-gen@v0.2.1
+GOTOOLCHAIN=auto go install github.com/topiaco/doc-gen/cmd/apidoc-gen@v0.2.2
 apidoc-gen version
 ```
 
-`v0.2.1` 包含 map 索引导致的初始化崩溃修复，并将结构体字面量中未赋值的 `any` / `interface{}` 字段识别为 `null`，消除错误响应中的 `schema.free_form` 误报。版本命令应输出 `apidoc-gen v0.2.1`。已初始化的项目升级后直接执行 `apidoc-gen` 即可。
+`v0.2.2` 修复响应 Schema 已有具体类型，但 Example Value 的 `data` 仍显示为 `null` 的问题：联合类型和同状态码响应优先展示非空数据结构，同时保留合法的 `null` 与错误响应分支。版本命令应输出 `apidoc-gen v0.2.2`。已初始化的项目升级后直接执行 `apidoc-gen` 即可。
 
-默认安装位置是 `go env GOPATH` 输出目录下的 `bin`，如果设置了 `GOBIN`，则使用该目录。将安装目录加入 PATH 后，即可使用 `apidoc-gen` 命令。业务项目不需要引入 doc-gen 的 Go 依赖。版本内容见 [v0.2.1 发布说明](https://github.com/topiaco/doc-gen/releases/tag/v0.2.1)。
+默认安装位置是 `go env GOPATH` 输出目录下的 `bin`，如果设置了 `GOBIN`，则使用该目录。将安装目录加入 PATH 后，即可使用 `apidoc-gen` 命令。业务项目不需要引入 doc-gen 的 Go 依赖。版本内容见 [v0.2.2 发布说明](https://github.com/topiaco/doc-gen/releases/tag/v0.2.2)。
 
 然后在业务项目的 `go.mod` 所在目录执行：
 
@@ -80,15 +80,15 @@ func Register(router *gin.Engine) {
 
 ## 3. GitHub PR 自动生成
 
-安装 `v0.2.1` 后，在业务项目中执行：
+安装 `v0.2.2` 后，在业务项目中执行：
 
 ```bash
 apidoc-gen init --existing --github
 ```
 
-工作流会自动固定使用 `v0.2.1`，无需填写提交 SHA。也可以在首次初始化时使用这条命令，同时创建已有接口记录和工作流。项目已经初始化时，已有记录保持不变。
+工作流会自动固定使用 `v0.2.2`，无需填写提交 SHA。也可以在首次初始化时使用这条命令，同时创建已有接口记录和工作流。项目已经初始化时，已有记录保持不变。
 
-已有工作流将 `APIDOC_VERSION` 改为 `v0.2.1` 即可使用新版本，原有的 Go 模块安装或 Git 标签源码安装方式均可继续使用。完整工作流和源码构建方式见[使用文档](docs/integration-guide.md#3-github-pr-自动生成)。
+已有工作流将 `APIDOC_VERSION` 改为 `v0.2.2` 即可使用新版本，原有的 Go 模块安装或 Git 标签源码安装方式均可继续使用。完整工作流和源码构建方式见[使用文档](docs/integration-guide.md#3-github-pr-自动生成)。
 
 将生成的 `.github/workflows/api-doc.yml` 与初始化文件一起提交后：
 
@@ -123,4 +123,4 @@ go vet ./...
 go build -o /tmp/apidoc-gen ./cmd/apidoc-gen
 ```
 
-验证本地源码修改时，使用 `/tmp/apidoc-gen` 执行命令。源码构建可能显示 Git 推导的版本、带 `+dirty` 的版本或 `dev`；创建 GitHub 工作流时，可以通过 `--generator-version v0.2.1` 指定正式版本。
+验证本地源码修改时，使用 `/tmp/apidoc-gen` 执行命令。源码构建可能显示 Git 推导的版本、带 `+dirty` 的版本或 `dev`；创建 GitHub 工作流时，可以通过 `--generator-version v0.2.2` 指定正式版本。

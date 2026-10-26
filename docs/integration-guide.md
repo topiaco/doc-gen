@@ -9,13 +9,13 @@
 使用 Go 1.26 或更新版本安装：
 
 ```bash
-GOTOOLCHAIN=auto go install github.com/topiaco/doc-gen/cmd/apidoc-gen@v0.2.1
+GOTOOLCHAIN=auto go install github.com/topiaco/doc-gen/cmd/apidoc-gen@v0.2.2
 apidoc-gen version
 ```
 
-`v0.2.1` 包含 map 索引导致的初始化崩溃修复，并将结构体字面量中未赋值的 `any` / `interface{}` 字段识别为 `null`，消除错误响应中的 `schema.free_form` 误报。版本命令应输出 `apidoc-gen v0.2.1`。已初始化的项目升级后直接执行 `apidoc-gen` 即可，已有接口记录保持不变。
+`v0.2.2` 修复响应 Schema 已有具体类型，但 Example Value 的 `data` 仍显示为 `null` 的问题：联合类型和同状态码响应优先展示非空数据结构，同时保留合法的 `null` 与错误响应分支。版本命令应输出 `apidoc-gen v0.2.2`。已初始化的项目升级后直接执行 `apidoc-gen` 即可，已有接口记录保持不变。
 
-默认安装位置是 `go env GOPATH` 输出目录下的 `bin`，如果设置了 `GOBIN`，则使用该目录。将安装目录加入 PATH 后，即可使用 `apidoc-gen` 命令。版本内容见 [v0.2.1 发布说明](https://github.com/topiaco/doc-gen/releases/tag/v0.2.1)。
+默认安装位置是 `go env GOPATH` 输出目录下的 `bin`，如果设置了 `GOBIN`，则使用该目录。将安装目录加入 PATH 后，即可使用 `apidoc-gen` 命令。版本内容见 [v0.2.2 发布说明](https://github.com/topiaco/doc-gen/releases/tag/v0.2.2)。
 
 业务项目不需要引入 doc-gen 的 Go 依赖。但是，生成器需要读取业务项目的类型信息，因此业务代码及其依赖必须能够被 Go 工具加载。分析过程使用只读模块模式，不会修改业务项目的 `go.mod` 或 `go.sum`，也不执行应用、`init` 函数或数据库查询。
 
@@ -162,13 +162,13 @@ func Register(router *gin.Engine) {
 
 ### 创建工作流
 
-安装 `v0.2.1` 后，在业务项目中执行：
+安装 `v0.2.2` 后，在业务项目中执行：
 
 ```bash
 apidoc-gen init --existing --github
 ```
 
-工作流会使用当前安装版本，自动将 `APIDOC_VERSION` 写为 `v0.2.1`。因此，本地和 GitHub 使用相同版本，无需填写提交 SHA。
+工作流会使用当前安装版本，自动将 `APIDOC_VERSION` 写为 `v0.2.2`。因此，本地和 GitHub 使用相同版本，无需填写提交 SHA。
 
 如果这是首次初始化，并且希望全部已有接口也生成文档，则不加 `--existing`。如果已经初始化，重复执行只会沿用已有记录，不会重置它。
 
@@ -178,7 +178,7 @@ apidoc-gen init --existing --github
 
 ```yaml
 env:
-  APIDOC_VERSION: "v0.2.1"
+  APIDOC_VERSION: "v0.2.2"
 ```
 
 保留 `PROJECT_DIR` 和其他已有设置。如果原有安装步骤使用 `go install "github.com/topiaco/doc-gen/cmd/apidoc-gen@$APIDOC_VERSION"`，无需修改该步骤。当前生成器创建的工作流从 Git 标签或提交构建，安装步骤如下：
@@ -208,10 +208,10 @@ go build -o /tmp/apidoc-gen ./cmd/apidoc-gen
 源码构建可能显示 Git 推导的版本、带 `+dirty` 的版本或 `dev`。在业务项目中创建工作流时，明确指定已发布的标签或提交：
 
 ```bash
-/tmp/apidoc-gen init --existing --github --generator-version v0.2.1
+/tmp/apidoc-gen init --existing --github --generator-version v0.2.2
 ```
 
-这里指定的是 GitHub 使用的生成器版本；本地尚未发布的修改不会包含在 `v0.2.1` 中。需要验证另一个已发布提交时，也可以将版本号换成该提交的完整 40 位 SHA。
+这里指定的是 GitHub 使用的生成器版本；本地尚未发布的修改不会包含在 `v0.2.2` 中。需要验证另一个已发布提交时，也可以将版本号换成该提交的完整 40 位 SHA。
 
 ### PR 和合并后的行为
 
