@@ -292,6 +292,7 @@ func buildResponse(response ir.Response, builder *schema.Builder) (openapi3.Resp
 
 	result.Content = make(map[string]openapi3.MediaType, len(mediaSchemas))
 	for mediaType, variants := range mediaSchemas {
+		builder.PrioritizeNonNullVariants(variants)
 		combined := variants[0]
 		// 各分支的结构可能重叠，因此使用 anyOf 表示响应可以符合其中任意一种结构
 		if len(variants) > 1 {
